@@ -813,7 +813,7 @@ class OGGRestAPI:
                     "required": [
                         "lines"
                     ],
-                    "additionalProperties": false
+                    "additionalProperties": False
                 })
         """
         return self._call(
@@ -1963,7 +1963,7 @@ class OGGRestAPI:
                     "oggHome": "/u01/ogg",
                     "oggEtcHome": "/home/ogg/ogg/etc",
                     "oggVarHome": "/home/ogg/ogg/var",
-                    "enabled": false
+                    "enabled": False
                 })
         """
         return self._call(
@@ -1989,7 +1989,7 @@ class OGGRestAPI:
             client.update_deployment(
                 deployment='deployment_example',
                 data={
-                    "enabled": true
+                    "enabled": True
                 })
         """
         return self._call(
@@ -2126,7 +2126,7 @@ class OGGRestAPI:
                         "securityGroup": "Demo-source-security",
                         "administratorGroup": "Demo-source-admin"
                     },
-                    "enabled": true
+                    "enabled": True
                 })
         """
         return self._call(
@@ -2589,14 +2589,14 @@ class OGGRestAPI:
                         "network": {
                             "serviceListeningPort": 19012
                         },
-                        "security": false,
-                        "authorizationEnabled": true,
+                        "security": False,
+                        "authorizationEnabled": True,
                         "defaultSynchronousWait": 30,
-                        "asynchronousOperationEnabled": true,
-                        "legacyProtocolEnabled": true,
-                        "taskManagerEnabled": true
+                        "asynchronousOperationEnabled": True,
+                        "legacyProtocolEnabled": True,
+                        "taskManagerEnabled": True
                     },
-                    "enabled": false
+                    "enabled": False
                 })
         """
         return self._call(
@@ -2624,7 +2624,7 @@ class OGGRestAPI:
                 service='service_example',
                 deployment='deployment_example',
                 data={
-                    "enabled": true,
+                    "enabled": True,
                     "status": "running"
                 })
         """
@@ -2918,7 +2918,7 @@ class OGGRestAPI:
                 profile='profile_example',
                 data={
                     "type": "okv",
-                    "isDefault": true
+                    "isDefault": True
                 })
         """
         return self._call(
@@ -3047,11 +3047,11 @@ class OGGRestAPI:
                         "alias": "ggnorth"
                     },
                     "registration": {
-                        "optimized": false,
+                        "optimized": False,
                         "containers": [
                             "dbnorth_pdb1"
                         ],
-                        "replace": true
+                        "replace": True
                     },
                     "begin": "now",
                     "targets": [
@@ -3914,7 +3914,7 @@ class OGGRestAPI:
                 data={
                     "$schema": "ogg:installationConfiguration",
                     "installationId": "5b5bee89-6e93-4920-9ac7-0a5582623a2d",
-                    "configurationServiceEnabled": true
+                    "configurationServiceEnabled": True
                 })
         """
         return self._call(
@@ -4244,7 +4244,7 @@ class OGGRestAPI:
             client.modify_log_properties(
                 log='log_example',
                 data={
-                    "enabled": true
+                    "enabled": True
                 })
         """
         return self._call(
@@ -6836,7 +6836,7 @@ class OGGRestAPI:
                 task='task_example',
                 data={
                     "description": "Check critical lag every hour",
-                    "enabled": false,
+                    "enabled": False,
                     "schedule": {
                         "every": {
                             "units": "hours",
@@ -6880,7 +6880,7 @@ class OGGRestAPI:
             client.update_task(
                 task='task_example',
                 data={
-                    "enabled": true
+                    "enabled": True
                 })
         """
         return self._call(

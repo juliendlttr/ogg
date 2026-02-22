@@ -619,7 +619,7 @@ class OGGRestAPI:
                     "required": [
                         "lines"
                     ],
-                    "additionalProperties": false
+                    "additionalProperties": False
                 })
         """
         return self._call(
@@ -1915,7 +1915,7 @@ class OGGRestAPI:
                 data={
                     "oggHome": "/home/oracle/oggSecondary",
                     "oggEtcHome": "/home/oracle/ogg/etc",
-                    "enabled": false
+                    "enabled": False
                 })
         """
         return self._call(
@@ -1940,7 +1940,7 @@ class OGGRestAPI:
             client.update_deployment(
                 deployment='deployment_example',
                 data={
-                    "enabled": true
+                    "enabled": True
                 })
         """
         return self._call(
@@ -2038,14 +2038,14 @@ class OGGRestAPI:
                         "network": {
                             "serviceListeningPort": 11001
                         },
-                        "security": false,
-                        "authorizationEnabled": true,
+                        "security": False,
+                        "authorizationEnabled": True,
                         "defaultSynchronousWait": 30,
-                        "asynchronousOperationEnabled": true,
-                        "legacyProtocolEnabled": true,
-                        "taskManagerEnabled": true
+                        "asynchronousOperationEnabled": True,
+                        "legacyProtocolEnabled": True,
+                        "taskManagerEnabled": True
                     },
-                    "enabled": false
+                    "enabled": False
                 })
         """
         return self._call(
@@ -2072,7 +2072,7 @@ class OGGRestAPI:
                 service='service_example',
                 deployment='deployment_example',
                 data={
-                    "enabled": true,
+                    "enabled": True,
                     "status": "running"
                 })
         """
@@ -2706,7 +2706,7 @@ class OGGRestAPI:
             client.modify_log_properties(
                 log='log_example',
                 data={
-                    "enabled": true
+                    "enabled": True
                 })
         """
         return self._call(
@@ -4646,7 +4646,7 @@ class OGGRestAPI:
                 task='task_example',
                 data={
                     "description": "Check critical lag every hour",
-                    "enabled": false,
+                    "enabled": False,
                     "schedule": {
                         "every": {
                             "units": "hours",
@@ -4689,7 +4689,7 @@ class OGGRestAPI:
             client.update_task(
                 task='task_example',
                 data={
-                    "enabled": true
+                    "enabled": True
                 })
         """
         return self._call(
