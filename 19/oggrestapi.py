@@ -564,26 +564,28 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def retrieve_configuration_data_type(self, version='v2'):
+    def retrieve_configuration_data_type(self, type, version='v2'):
         """
         GET /services/{version}/config/types/{type}
         Retrieve a configuration data type.
 
         Parameters:
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
-            client.retrieve_configuration_data_type()
-
+            client.retrieve_configuration_data_type(
+                type='type_example'
+            )
         """
         return self._call(
             "GET",
             "/services/{version}/config/types/{type}",
-            path_params={"version": version},
+            path_params={"type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def create_configuration_data_type(self, data=None, version='v2'):
+    def create_configuration_data_type(self, type, data=None, version='v2'):
         """
         POST /services/{version}/config/types/{type}
         Create a new configuration data type.
@@ -591,9 +593,11 @@ class OGGRestAPI:
         Parameters:
             version (string): Oracle GoldenGate Service API version. Example: v2
             body (object):  Example: body_example
+            type (string):  Example: type_example
 
         Example:
             client.create_configuration_data_type(
+                type='type_example',
                 data={
                     "id": "custom:config",
                     "title": "Custom Configuration Data",
@@ -625,50 +629,54 @@ class OGGRestAPI:
         return self._call(
             "POST",
             "/services/{version}/config/types/{type}",
-            path_params={"version": version},
+            path_params={"type": type, "version": version},
             data=data,
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def delete_configuration_data_type(self, version='v2'):
+    def delete_configuration_data_type(self, type, version='v2'):
         """
         DELETE /services/{version}/config/types/{type}
         Delete a configuration data type.
 
         Parameters:
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
-            client.delete_configuration_data_type()
-
+            client.delete_configuration_data_type(
+                type='type_example'
+            )
         """
         return self._call(
             "DELETE",
             "/services/{version}/config/types/{type}",
-            path_params={"version": version},
+            path_params={"type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values
-    def list_configuration_values(self, version='v2'):
+    def list_configuration_values(self, type, version='v2'):
         """
         GET /services/{version}/config/types/{type}/values
         Retrieve the collection of names of the configuration values for a data type.
 
         Parameters:
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
-            client.list_configuration_values()
-
+            client.list_configuration_values(
+                type='type_example'
+            )
         """
         return self._call(
             "GET",
             "/services/{version}/config/types/{type}/values",
-            path_params={"version": version},
+            path_params={"type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def retrieve_configuration_value(self, value, version='v2'):
+    def retrieve_configuration_value(self, value, type, version='v2'):
         """
         GET /services/{version}/config/types/{type}/values/{value}
         Retrieve a configuration value.
@@ -677,20 +685,22 @@ class OGGRestAPI:
             value (string): Value name, an alpha-numeric character followed by up to 63 alpha-numeric
                 characters, '_', ':' or '-'. Example: value_example
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
             client.retrieve_configuration_value(
-                value='value_example'
+                value='value_example',
+                type='type_example'
             )
         """
         return self._call(
             "GET",
             "/services/{version}/config/types/{type}/values/{value}",
-            path_params={"value": value, "version": version},
+            path_params={"value": value, "type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def create_configuration_value(self, value, data=None, version='v2'):
+    def create_configuration_value(self, value, type, data=None, version='v2'):
         """
         POST /services/{version}/config/types/{type}/values/{value}
         Create a new configuration value.
@@ -700,10 +710,12 @@ class OGGRestAPI:
                 characters, '_', ':' or '-'. Example: value_example
             version (string): Oracle GoldenGate Service API version. Example: v2
             body (object):  Example: body_example
+            type (string):  Example: type_example
 
         Example:
             client.create_configuration_value(
                 value='value_example',
+                type='type_example',
                 data={
                     "$schema": "custom:config",
                     "lines": [
@@ -716,12 +728,12 @@ class OGGRestAPI:
         return self._call(
             "POST",
             "/services/{version}/config/types/{type}/values/{value}",
-            path_params={"value": value, "version": version},
+            path_params={"value": value, "type": type, "version": version},
             data=data,
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def replace_configuration_value(self, value, data=None, version='v2'):
+    def replace_configuration_value(self, value, type, data=None, version='v2'):
         """
         PUT /services/{version}/config/types/{type}/values/{value}
         Replace an existing configuration value.
@@ -731,10 +743,12 @@ class OGGRestAPI:
                 characters, '_', ':' or '-'. Example: value_example
             version (string): Oracle GoldenGate Service API version. Example: v2
             body (object):  Example: body_example
+            type (string):  Example: type_example
 
         Example:
             client.replace_configuration_value(
                 value='value_example',
+                type='type_example',
                 data={
                     "$schema": "custom:config",
                     "lines": [
@@ -748,12 +762,12 @@ class OGGRestAPI:
         return self._call(
             "PUT",
             "/services/{version}/config/types/{type}/values/{value}",
-            path_params={"value": value, "version": version},
+            path_params={"value": value, "type": type, "version": version},
             data=data,
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def delete_configuration_value(self, value, version='v2'):
+    def delete_configuration_value(self, value, type, version='v2'):
         """
         DELETE /services/{version}/config/types/{type}/values/{value}
         Delete a configuration value.
@@ -762,16 +776,18 @@ class OGGRestAPI:
             value (string): Value name, an alpha-numeric character followed by up to 63 alpha-numeric
                 characters, '_', ':' or '-'. Example: value_example
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
             client.delete_configuration_value(
-                value='value_example'
+                value='value_example',
+                type='type_example'
             )
         """
         return self._call(
             "DELETE",
             "/services/{version}/config/types/{type}/values/{value}",
-            path_params={"value": value, "version": version},
+            path_params={"value": value, "type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/connections

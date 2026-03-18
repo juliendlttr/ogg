@@ -410,7 +410,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/certificates/{type}
-    def retrieve_certificate_names(self, version='v2'):
+    def retrieve_certificate_names(self, type, version='v2'):
         """
         GET /services/{version}/certificates/{type}
         Required Role: Administrator
@@ -418,19 +418,21 @@ class OGGRestAPI:
 
         Parameters:
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
-            client.retrieve_certificate_names()
-
+            client.retrieve_certificate_names(
+                type='type_example'
+            )
         """
         return self._call(
             "GET",
             "/services/{version}/certificates/{type}",
-            path_params={"version": version},
+            path_params={"type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/certificates/{type}/{certificate}
-    def retrieve_certificate(self, certificate, version='v2'):
+    def retrieve_certificate(self, certificate, type, version='v2'):
         """
         GET /services/{version}/certificates/{type}/{certificate}
         Required Role: Administrator
@@ -439,20 +441,22 @@ class OGGRestAPI:
         Parameters:
             certificate (string): Certificate name. Example: certificate_example
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
             client.retrieve_certificate(
-                certificate='certificate_example'
+                certificate='certificate_example',
+                type='type_example'
             )
         """
         return self._call(
             "GET",
             "/services/{version}/certificates/{type}/{certificate}",
-            path_params={"certificate": certificate, "version": version},
+            path_params={"certificate": certificate, "type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/certificates/{type}/{certificate}/info
-    def retrieve_certificate_information(self, certificate, version='v2'):
+    def retrieve_certificate_information(self, certificate, type, version='v2'):
         """
         GET /services/{version}/certificates/{type}/{certificate}/info
         Required Role: Administrator
@@ -461,16 +465,18 @@ class OGGRestAPI:
         Parameters:
             certificate (string): Certificate name. Example: certificate_example
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
             client.retrieve_certificate_information(
-                certificate='certificate_example'
+                certificate='certificate_example',
+                type='type_example'
             )
         """
         return self._call(
             "GET",
             "/services/{version}/certificates/{type}/{certificate}/info",
-            path_params={"certificate": certificate, "version": version},
+            path_params={"certificate": certificate, "type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/commands/execute
@@ -714,7 +720,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def retrieve_configuration_data_type(self, version='v2'):
+    def retrieve_configuration_data_type(self, type, version='v2'):
         """
         GET /services/{version}/config/types/{type}
         Required Role: User
@@ -722,19 +728,21 @@ class OGGRestAPI:
 
         Parameters:
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
-            client.retrieve_configuration_data_type()
-
+            client.retrieve_configuration_data_type(
+                type='type_example'
+            )
         """
         return self._call(
             "GET",
             "/services/{version}/config/types/{type}",
-            path_params={"version": version},
+            path_params={"type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def create_configuration_data_type(self, data=None, version='v2'):
+    def create_configuration_data_type(self, type, data=None, version='v2'):
         """
         POST /services/{version}/config/types/{type}
         Required Role: Administrator
@@ -743,9 +751,11 @@ class OGGRestAPI:
         Parameters:
             version (string): Oracle GoldenGate Service API version. Example: v2
             body (object):  Example: body_example
+            type (string):  Example: type_example
 
         Example:
             client.create_configuration_data_type(
+                type='type_example',
                 data={
                     "id": "custom:config",
                     "title": "Custom Configuration Data",
@@ -777,12 +787,12 @@ class OGGRestAPI:
         return self._call(
             "POST",
             "/services/{version}/config/types/{type}",
-            path_params={"version": version},
+            path_params={"type": type, "version": version},
             data=data,
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def delete_configuration_data_type(self, version='v2'):
+    def delete_configuration_data_type(self, type, version='v2'):
         """
         DELETE /services/{version}/config/types/{type}
         Required Role: Administrator
@@ -790,19 +800,21 @@ class OGGRestAPI:
 
         Parameters:
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
-            client.delete_configuration_data_type()
-
+            client.delete_configuration_data_type(
+                type='type_example'
+            )
         """
         return self._call(
             "DELETE",
             "/services/{version}/config/types/{type}",
-            path_params={"version": version},
+            path_params={"type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values
-    def list_configuration_values(self, version='v2'):
+    def list_configuration_values(self, type, version='v2'):
         """
         GET /services/{version}/config/types/{type}/values
         Required Role: User
@@ -810,19 +822,21 @@ class OGGRestAPI:
 
         Parameters:
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
-            client.list_configuration_values()
-
+            client.list_configuration_values(
+                type='type_example'
+            )
         """
         return self._call(
             "GET",
             "/services/{version}/config/types/{type}/values",
-            path_params={"version": version},
+            path_params={"type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def retrieve_configuration_value(self, value, version='v2'):
+    def retrieve_configuration_value(self, value, type, version='v2'):
         """
         GET /services/{version}/config/types/{type}/values/{value}
         Required Role: User
@@ -832,20 +846,22 @@ class OGGRestAPI:
             value (string): Value name, an alpha-numeric character followed by up to 95 alpha-numeric
                 characters, '_', ':' or '-'. Example: value_example
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
             client.retrieve_configuration_value(
-                value='value_example'
+                value='value_example',
+                type='type_example'
             )
         """
         return self._call(
             "GET",
             "/services/{version}/config/types/{type}/values/{value}",
-            path_params={"value": value, "version": version},
+            path_params={"value": value, "type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def create_configuration_value(self, value, data=None, version='v2'):
+    def create_configuration_value(self, value, type, data=None, version='v2'):
         """
         POST /services/{version}/config/types/{type}/values/{value}
         Required Role: Administrator
@@ -856,10 +872,12 @@ class OGGRestAPI:
                 characters, '_', ':' or '-'. Example: value_example
             version (string): Oracle GoldenGate Service API version. Example: v2
             body (object):  Example: body_example
+            type (string):  Example: type_example
 
         Example:
             client.create_configuration_value(
                 value='value_example',
+                type='type_example',
                 data={
                     "$schema": "custom:config",
                     "lines": [
@@ -872,12 +890,12 @@ class OGGRestAPI:
         return self._call(
             "POST",
             "/services/{version}/config/types/{type}/values/{value}",
-            path_params={"value": value, "version": version},
+            path_params={"value": value, "type": type, "version": version},
             data=data,
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def replace_configuration_value(self, value, data=None, version='v2'):
+    def replace_configuration_value(self, value, type, data=None, version='v2'):
         """
         PUT /services/{version}/config/types/{type}/values/{value}
         Required Role: Administrator
@@ -888,10 +906,12 @@ class OGGRestAPI:
                 characters, '_', ':' or '-'. Example: value_example
             version (string): Oracle GoldenGate Service API version. Example: v2
             body (object):  Example: body_example
+            type (string):  Example: type_example
 
         Example:
             client.replace_configuration_value(
                 value='value_example',
+                type='type_example',
                 data={
                     "$schema": "custom:config",
                     "lines": [
@@ -905,12 +925,12 @@ class OGGRestAPI:
         return self._call(
             "PUT",
             "/services/{version}/config/types/{type}/values/{value}",
-            path_params={"value": value, "version": version},
+            path_params={"value": value, "type": type, "version": version},
             data=data,
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def delete_configuration_value(self, value, version='v2'):
+    def delete_configuration_value(self, value, type, version='v2'):
         """
         DELETE /services/{version}/config/types/{type}/values/{value}
         Required Role: Administrator
@@ -920,16 +940,18 @@ class OGGRestAPI:
             value (string): Value name, an alpha-numeric character followed by up to 95 alpha-numeric
                 characters, '_', ':' or '-'. Example: value_example
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
             client.delete_configuration_value(
-                value='value_example'
+                value='value_example',
+                type='type_example'
             )
         """
         return self._call(
             "DELETE",
             "/services/{version}/config/types/{type}/values/{value}",
-            path_params={"value": value, "version": version},
+            path_params={"value": value, "type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/connections
@@ -2165,7 +2187,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}
-    def retrieve_certificate_types(self, deployment, version='v2'):
+    def retrieve_certificate_types(self, deployment, type, version='v2'):
         """
         GET /services/{version}/deployments/{deployment}/certificates/{type}
         Required Role: Administrator
@@ -2174,20 +2196,22 @@ class OGGRestAPI:
         Parameters:
             deployment (string): Name for the Oracle GoldenGate deployment. Example: deployment_example
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
             client.retrieve_certificate_types(
-                deployment='deployment_example'
+                deployment='deployment_example',
+                type='type_example'
             )
         """
         return self._call(
             "GET",
             "/services/{version}/deployments/{deployment}/certificates/{type}",
-            path_params={"deployment": deployment, "version": version},
+            path_params={"deployment": deployment, "type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
-    def retrieve_certificate_deployment(self, certificate, deployment, version='v2'):
+    def retrieve_certificate_deployment(self, certificate, deployment, type, version='v2'):
         """
         GET /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
         Required Role: Administrator
@@ -2197,21 +2221,23 @@ class OGGRestAPI:
             certificate (string): Deployment certificate name. Example: certificate_example
             deployment (string): Name for the Oracle GoldenGate deployment. Example: deployment_example
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
             client.retrieve_certificate_deployment(
                 certificate='certificate_example',
-                deployment='deployment_example'
+                deployment='deployment_example',
+                type='type_example'
             )
         """
         return self._call(
             "GET",
             "/services/{version}/deployments/{deployment}/certificates/{type}/{certificate}",
-            path_params={"certificate": certificate, "deployment": deployment, "version": version},
+            path_params={"certificate": certificate, "deployment": deployment, "type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
-    def add_named_certificate(self, certificate, deployment, data=None, version='v2'):
+    def add_named_certificate(self, certificate, deployment, type, data=None, version='v2'):
         """
         POST /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
         Required Role: Security
@@ -2223,11 +2249,13 @@ class OGGRestAPI:
             deployment (string): Name for the Oracle GoldenGate deployment. Example: deployment_example
             version (string): Oracle GoldenGate Service API version. Example: v2
             body (object):  Example: body_example
+            type (string):  Example: type_example
 
         Example:
             client.add_named_certificate(
                 certificate='certificate_example',
                 deployment='deployment_example',
+                type='type_example',
                 data={
                     "certificateBundle": {
                         "caCertificates": [
@@ -2241,12 +2269,12 @@ class OGGRestAPI:
         return self._call(
             "POST",
             "/services/{version}/deployments/{deployment}/certificates/{type}/{certificate}",
-            path_params={"certificate": certificate, "deployment": deployment, "version": version},
+            path_params={"certificate": certificate, "deployment": deployment, "type": type, "version": version},
             data=data,
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
-    def replace_named_certificate(self, certificate, deployment, data=None, version='v2'):
+    def replace_named_certificate(self, certificate, deployment, type, data=None, version='v2'):
         """
         PUT /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
         Required Role: Security
@@ -2257,11 +2285,13 @@ class OGGRestAPI:
             deployment (string): Name for the Oracle GoldenGate deployment. Example: deployment_example
             version (string): Oracle GoldenGate Service API version. Example: v2
             body (object):  Example: body_example
+            type (string):  Example: type_example
 
         Example:
             client.replace_named_certificate(
                 certificate='certificate_example',
                 deployment='deployment_example',
+                type='type_example',
                 data={
                     "certificateBundle": {
                         "caCertificates": [
@@ -2275,12 +2305,12 @@ class OGGRestAPI:
         return self._call(
             "PUT",
             "/services/{version}/deployments/{deployment}/certificates/{type}/{certificate}",
-            path_params={"certificate": certificate, "deployment": deployment, "version": version},
+            path_params={"certificate": certificate, "deployment": deployment, "type": type, "version": version},
             data=data,
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
-    def delete_named_certificate(self, certificate, deployment, version='v2'):
+    def delete_named_certificate(self, certificate, deployment, type, version='v2'):
         """
         DELETE /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
         Required Role: Security
@@ -2290,21 +2320,23 @@ class OGGRestAPI:
             certificate (string): Deployment certificate name. Example: certificate_example
             deployment (string): Name for the Oracle GoldenGate deployment. Example: deployment_example
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
             client.delete_named_certificate(
                 certificate='certificate_example',
-                deployment='deployment_example'
+                deployment='deployment_example',
+                type='type_example'
             )
         """
         return self._call(
             "DELETE",
             "/services/{version}/deployments/{deployment}/certificates/{type}/{certificate}",
-            path_params={"certificate": certificate, "deployment": deployment, "version": version},
+            path_params={"certificate": certificate, "deployment": deployment, "type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}/info
-    def retrieve_certificate_information_deployment(self, certificate, deployment, version='v2'):
+    def retrieve_certificate_information_deployment(self, certificate, deployment, type, version='v2'):
         """
         GET /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}/info
         Required Role: Administrator
@@ -2314,17 +2346,19 @@ class OGGRestAPI:
             certificate (string): Deployment certificate name. Example: certificate_example
             deployment (string): Name for the Oracle GoldenGate deployment. Example: deployment_example
             version (string): Oracle GoldenGate Service API version. Example: v2
+            type (string):  Example: type_example
 
         Example:
             client.retrieve_certificate_information_deployment(
                 certificate='certificate_example',
-                deployment='deployment_example'
+                deployment='deployment_example',
+                type='type_example'
             )
         """
         return self._call(
             "GET",
             "/services/{version}/deployments/{deployment}/certificates/{type}/{certificate}/info",
-            path_params={"certificate": certificate, "deployment": deployment, "version": version},
+            path_params={"certificate": certificate, "deployment": deployment, "type": type, "version": version},
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/plugin/templates
