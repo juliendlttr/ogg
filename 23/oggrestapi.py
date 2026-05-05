@@ -65,9 +65,13 @@ class OGGRestAPI:
             verify=self.verify_ssl,
             timeout=self.timeout
         )
-        self._check_response(response, url)
+
         result = self._parse(response)
-        return result if raw_response else self._extract_main(result)
+        if raw_response:
+            return result
+        else:
+            self._check_response(response, url)
+            return self._extract_main(result)
 
     def _build_path(self, template, ogg_service=None, path_params=None):
         path_params = path_params or {}
@@ -86,8 +90,8 @@ class OGGRestAPI:
             # This is a common endpoint and a deployment is specified. Choosing adminsrvr service by default.
             ogg_service = "adminsrvr"
         path = self._build_path(template, ogg_service=ogg_service, path_params=path_params)
-        result = self._request(method, path, params=params, data=data, raw_response=True)
-        return result if raw_response else self._extract_main(result)
+        result = self._request(method, path, params=params, data=data, raw_response=raw_response)
+        return result
 
     def _get(self, path, params=None, raw_response=False):
         return self._request('GET', path, params=params, raw_response=raw_response)
