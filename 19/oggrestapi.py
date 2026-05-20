@@ -67,7 +67,7 @@ class OGGRestAPI:
         )
 
         if raw_response:
-            return result
+            return response
         else:
             result = self._parse(response)
             self._check_response(response, url)
@@ -85,12 +85,26 @@ class OGGRestAPI:
                 template = f'/services/{self.deployment}/{ogg_service}/{template.lstrip("/services")}'
         return template.format(**path_params)
 
-    def _call(self, method, template, *, ogg_service=None, path_params=None, params=None, data=None, raw_response=False, if_exists='fail'):
+    def _call(self, method, template, *, ogg_service=None, path_params=None, params=None,
+              data=None, body_params=None, raw_response=False, if_exists='fail'):
         if self.reverse_proxy and ogg_service == '' and self.deployment:
             # This is a common endpoint and a deployment is specified. Choosing adminsrvr service by default.
             ogg_service = "adminsrvr"
         path = self._build_path(template, ogg_service=ogg_service, path_params=path_params)
         url = f'{self.base_url}{path}'
+
+        # Merge body_params into data when provided. body_params is a dict mapping
+        # payload field names to values (the generated methods pass their
+        # explicit body params here). Only merge when `data` is a dict or None.
+        if body_params:
+            if data is None:
+                data = {}
+            if isinstance(data, dict):
+                for k, v in body_params.items():
+                    if v is not None:
+                        data[k] = v
+            if not data:
+                data = None
 
         # If caller asked to skip on existing resource, perform a raw request and handle 409 specially
         if if_exists == 'skip':
@@ -154,7 +168,7 @@ class OGGRestAPI:
                 if 'messages' in response.json():
                     messages = response.json().get('messages', [])
                     raise Exception(
-                        ' ; '.join([f"{message['severity']} - {url}: {message['title']}" for message in messages])
+                        ' ; '.join([f"{message['severity']} (code {response.status_code}) - {url}: {message['title']}" for message in messages])
                     )
                 else:
                     print(f'HTTP {response.status_code}: {response.text}')
@@ -187,7 +201,11 @@ class OGGRestAPI:
         pprint(result)
 
     # Endpoint: /services
-    def retrieve_api_versions(self, ogg_service='', raw_response=False):
+    def retrieve_api_versions(
+        self,
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/REST API Catalog
         GET /services
@@ -208,14 +226,19 @@ class OGGRestAPI:
         return self._call("GET", "/services", raw_response=raw_response)
 
     # Endpoint: /services/{version}
-    def describe_api_version(self, version='v2', ogg_service='', raw_response=False):
+    def describe_api_version(
+        self,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/REST API Catalog
         GET /services/{version}
         Use this endpoint to obtain details of a specific version of an Oracle GoldenGate Service REST API.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -238,14 +261,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/authorizations
-    def list_user_roles(self, version='v2', ogg_service='', raw_response=False):
+    def list_user_roles(
+        self,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/User Management
         GET /services/{version}/authorizations
         Get the collection of roles in this deployment.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -268,15 +296,21 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/authorizations/{role}
-    def list_users(self, role, version='v2', ogg_service='', raw_response=False):
+    def list_users(
+        self,
+        role,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/User Management
         GET /services/{version}/authorizations/{role}
         Get the collection of Authorized Users associated with the Authorization Role.
 
         Parameters:
-            role (str): Authorization Role Resource Name. Example: User
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            role (str): Authorization Role Resource Name. Required. Example: User
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -301,16 +335,26 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/authorizations/{role}
-    def bulk_create_users_for_role(self, role, data=None, version='v2', ogg_service='', raw_response=False):
+    def bulk_create_users_for_role(
+        self,
+        role,
+        users=None,
+        data=None,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/User Management
         POST /services/{version}/authorizations/{role}
         Create multiple users associated with the given role.
 
         Parameters:
-            role (str): Authorization Role Resource Name. Example: User
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            role (str): Authorization Role Resource Name. Required. Example: User
+            users (list): Required if not included in `data`. Example: users_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -333,6 +377,21 @@ class OGGRestAPI:
                     ]
                 }
             )
+
+            client.bulk_create_users_for_role(
+                role='User',
+                ogg_service='adminsrvr',
+                users=[
+                    {
+                        "username": "tkgguser01",
+                        "credential": "password-A1"
+                    },
+                    {
+                        "username": "tkgguser02",
+                        "credential": "password-B2"
+                    }
+                ]
+            )
         """
         path_params = {
             "role": role,
@@ -343,21 +402,31 @@ class OGGRestAPI:
             "/services/{version}/authorizations/{role}",
             path_params=path_params,
             data=data,
+            body_params={
+                "users": users,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/authorizations/{role}/{user}
-    def retrieve_user(self, user, role, version='v2', ogg_service='', raw_response=False):
+    def retrieve_user(
+        self,
+        user,
+        role,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/User Management
         GET /services/{version}/authorizations/{role}/{user}
         Get Authorization User Resource information.
 
         Parameters:
-            user (str): User Resource Name. Example: user_example
-            role (str): Authorization Role Resource Name. Example: User
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            user (str): User Resource Name. Required. Example: user_example
+            role (str): Authorization Role Resource Name. Required. Example: User
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -384,17 +453,37 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/authorizations/{role}/{user}
-    def create_user(self, user, role, data=None, version='v2', ogg_service='', raw_response=False, if_exists='fail'):
+    def create_user(
+        self,
+        user,
+        role,
+        role_1=None,
+        user_1=None,
+        credential=None,
+        info=None,
+        type=None,
+        data=None,
+        version='v2',
+        ogg_service='',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Common/User Management
         POST /services/{version}/authorizations/{role}/{user}
         Create a new Authorization User Resource.
 
         Parameters:
-            user (str): User Resource Name. Example: user_example
-            role (str): Authorization Role Resource Name. Example: User
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            user (str): User Resource Name. Required. Example: user_example
+            role (str): Authorization Role Resource Name. Required. Example: User
+            role (str):  Example: role_example
+            user (str):  Example: user_example
+            credential (str):  Example: credential_example
+            info (str):  Example: info_example
+            type (str):  Example: type_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -412,6 +501,17 @@ class OGGRestAPI:
                     "info": "Example user #3"
                 }
             )
+
+            client.create_user(
+                user='user_example',
+                role='User',
+                ogg_service='adminsrvr',
+                role_1=None,
+                user_1=None,
+                credential='password-A1z',
+                info='Example user #3',
+                type=None
+            )
         """
         path_params = {
             "user": user,
@@ -423,23 +523,49 @@ class OGGRestAPI:
             "/services/{version}/authorizations/{role}/{user}",
             path_params=path_params,
             data=data,
+            body_params={
+                "role": role_1,
+                "user": user_1,
+                "credential": credential,
+                "info": info,
+                "type": type,
+            },
             ogg_service=ogg_service,
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/authorizations/{role}/{user}
-    def update_user(self, user, role, data=None, version='v2', ogg_service='', raw_response=False):
+    def update_user(
+        self,
+        user,
+        role,
+        role_1=None,
+        user_1=None,
+        credential=None,
+        info=None,
+        type=None,
+        data=None,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/User Management
         PATCH /services/{version}/authorizations/{role}/{user}
         Update an existing Authorization User Resource.
 
         Parameters:
-            user (str): User Resource Name. Example: user_example
-            role (str): Authorization Role Resource Name. Example: User
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            user (str): User Resource Name. Required. Example: user_example
+            role (str): Authorization Role Resource Name. Required. Example: User
+            role (str):  Example: role_example
+            user (str):  Example: user_example
+            credential (str):  Example: credential_example
+            info (str):  Example: info_example
+            type (str):  Example: type_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -454,6 +580,17 @@ class OGGRestAPI:
                     "credential": "NewPassword-Z1a"
                 }
             )
+
+            client.update_user(
+                user='user_example',
+                role='User',
+                ogg_service='adminsrvr',
+                role_1=None,
+                user_1=None,
+                credential='NewPassword-Z1a',
+                info=None,
+                type=None
+            )
         """
         path_params = {
             "user": user,
@@ -465,12 +602,26 @@ class OGGRestAPI:
             "/services/{version}/authorizations/{role}/{user}",
             path_params=path_params,
             data=data,
+            body_params={
+                "role": role_1,
+                "user": user_1,
+                "credential": credential,
+                "info": info,
+                "type": type,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/authorizations/{role}/{user}
-    def delete_user(self, user, role, version='v2', ogg_service='', raw_response=False):
+    def delete_user(
+        self,
+        user,
+        role,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/User Management
         DELETE /services/{version}/authorizations/{role}/{user}
@@ -478,9 +629,9 @@ class OGGRestAPI:
             of "all" for {role}.
 
         Parameters:
-            user (str): User Resource Name. Example: user_example
-            role (str): Authorization Role Resource Name. Example: User
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            user (str): User Resource Name. Required. Example: user_example
+            role (str): Authorization Role Resource Name. Required. Example: User
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -507,7 +658,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/commands/execute
-    def execute_command(self, data=None, version='v2', raw_response=False):
+    def execute_command(
+        self,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Commands
         POST /services/{version}/commands/execute
@@ -516,7 +672,7 @@ class OGGRestAPI:
 
         Parameters:
             data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -552,14 +708,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/files
-    def list_configuration_files(self, version='v2', raw_response=False):
+    def list_configuration_files(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Configuration Settings
         GET /services/{version}/config/files
         Retrieve the collection of configuration files.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -578,15 +738,20 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/files/{file}
-    def retrieve_configuration_file(self, file, version='v2', raw_response=False):
+    def retrieve_configuration_file(
+        self,
+        file,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Configuration Settings
         GET /services/{version}/config/files/{file}
         Retrieve the contents of a configuration file.
 
         Parameters:
-            file (str): The name of a configuration file. Example: file_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            file (str): The name of a configuration file. Required. Example: file_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -607,16 +772,26 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/files/{file}
-    def create_configuration_file(self, file, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_configuration_file(
+        self,
+        file,
+        lines=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Configuration Settings
         POST /services/{version}/config/files/{file}
         Create a new configuration file.
 
         Parameters:
-            file (str): The name of a configuration file. Example: file_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            file (str): The name of a configuration file. Required. Example: file_example
+            lines (list): Required if not included in `data`. Example: lines_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -632,6 +807,14 @@ class OGGRestAPI:
                     ]
                 }
             )
+
+            client.create_configuration_file(
+                file='file_example',
+                lines=[
+                    "UseridAlias oggadmin",
+                    "ReportCount Every 1000 Records"
+                ]
+            )
         """
         path_params = {
             "file": file,
@@ -642,21 +825,33 @@ class OGGRestAPI:
             "/services/{version}/config/files/{file}",
             path_params=path_params,
             data=data,
+            body_params={
+                "lines": lines,
+            },
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/config/files/{file}
-    def replace_configuration_file(self, file, data=None, version='v2', raw_response=False):
+    def replace_configuration_file(
+        self,
+        file,
+        lines=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Configuration Settings
         PUT /services/{version}/config/files/{file}
         Modify an existing configuration file.
 
         Parameters:
-            file (str): The name of a configuration file. Example: file_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            file (str): The name of a configuration file. Required. Example: file_example
+            lines (list): Required if not included in `data`. Example: lines_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -670,6 +865,14 @@ class OGGRestAPI:
                     ]
                 }
             )
+
+            client.replace_configuration_file(
+                file='file_example',
+                lines=[
+                    "UseridAlias oggadmin",
+                    "ReportCount Every 100000 Records"
+                ]
+            )
         """
         path_params = {
             "file": file,
@@ -680,19 +883,27 @@ class OGGRestAPI:
             "/services/{version}/config/files/{file}",
             path_params=path_params,
             data=data,
+            body_params={
+                "lines": lines,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/config/files/{file}
-    def delete_configuration_file(self, file, version='v2', raw_response=False):
+    def delete_configuration_file(
+        self,
+        file,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Configuration Settings
         DELETE /services/{version}/config/files/{file}
         Delete a configuration file.
 
         Parameters:
-            file (str): The name of a configuration file. Example: file_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            file (str): The name of a configuration file. Required. Example: file_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -713,14 +924,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/health
-    def service_health_details(self, version='v2', ogg_service='', raw_response=False):
+    def service_health_details(
+        self,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Configuration
         GET /services/{version}/config/health
         Retrieve detailed information for the service health.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -743,14 +959,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/health/check
-    def service_health_summary(self, version='v2', ogg_service='', raw_response=False):
+    def service_health_summary(
+        self,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Configuration
         GET /services/{version}/config/health/check
         Retrieve summary information for the service health.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -773,14 +994,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/summary
-    def service_configuration_summary(self, version='v2', ogg_service='', raw_response=False):
+    def service_configuration_summary(
+        self,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Configuration
         GET /services/{version}/config/summary
         Retrieve summary information for the service.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -803,14 +1029,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types
-    def list_configuration_data_types(self, version='v2', raw_response=False):
+    def list_configuration_data_types(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Configuration Settings
         GET /services/{version}/config/types
         Retrieve the collection of configuration variable data types.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -829,15 +1059,20 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def retrieve_configuration_data_type(self, type, version='v2', raw_response=False):
+    def retrieve_configuration_data_type(
+        self,
+        type,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Configuration Settings
         GET /services/{version}/config/types/{type}
         Retrieve a configuration data type.
 
         Parameters:
-            type (str):  Example: type_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            type (str): Required. Example: type_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -858,16 +1093,23 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def create_configuration_data_type(self, type, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_configuration_data_type(
+        self,
+        type,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Configuration Settings
         POST /services/{version}/config/types/{type}
         Create a new configuration data type.
 
         Parameters:
-            type (str):  Example: type_example
+            type (str): Required. Example: type_example
             data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -919,15 +1161,20 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def delete_configuration_data_type(self, type, version='v2', raw_response=False):
+    def delete_configuration_data_type(
+        self,
+        type,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Configuration Settings
         DELETE /services/{version}/config/types/{type}
         Delete a configuration data type.
 
         Parameters:
-            type (str):  Example: type_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            type (str): Required. Example: type_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -948,15 +1195,20 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values
-    def list_configuration_values(self, type, version='v2', raw_response=False):
+    def list_configuration_values(
+        self,
+        type,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Configuration Settings
         GET /services/{version}/config/types/{type}/values
         Retrieve the collection of names of the configuration values for a data type.
 
         Parameters:
-            type (str):  Example: type_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            type (str): Required. Example: type_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -977,7 +1229,13 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def retrieve_configuration_value(self, value, type, version='v2', raw_response=False):
+    def retrieve_configuration_value(
+        self,
+        value,
+        type,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Configuration Settings
         GET /services/{version}/config/types/{type}/values/{value}
@@ -985,9 +1243,9 @@ class OGGRestAPI:
 
         Parameters:
             value (str): Value name, an alpha-numeric character followed by up to 63 alpha-numeric
-                characters, '_', ':' or '-'. Example: value_example
-            type (str):  Example: type_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                characters, '_', ':' or '-'. Required. Example: value_example
+            type (str): Required. Example: type_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1010,7 +1268,15 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def create_configuration_value(self, value, type, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_configuration_value(
+        self,
+        value,
+        type,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Configuration Settings
         POST /services/{version}/config/types/{type}/values/{value}
@@ -1018,10 +1284,10 @@ class OGGRestAPI:
 
         Parameters:
             value (str): Value name, an alpha-numeric character followed by up to 63 alpha-numeric
-                characters, '_', ':' or '-'. Example: value_example
-            type (str):  Example: type_example
+                characters, '_', ':' or '-'. Required. Example: value_example
+            type (str): Required. Example: type_example
             data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -1056,7 +1322,14 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def replace_configuration_value(self, value, type, data=None, version='v2', raw_response=False):
+    def replace_configuration_value(
+        self,
+        value,
+        type,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Configuration Settings
         PUT /services/{version}/config/types/{type}/values/{value}
@@ -1064,10 +1337,10 @@ class OGGRestAPI:
 
         Parameters:
             value (str): Value name, an alpha-numeric character followed by up to 63 alpha-numeric
-                characters, '_', ':' or '-'. Example: value_example
-            type (str):  Example: type_example
+                characters, '_', ':' or '-'. Required. Example: value_example
+            type (str): Required. Example: type_example
             data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1100,7 +1373,13 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def delete_configuration_value(self, value, type, version='v2', raw_response=False):
+    def delete_configuration_value(
+        self,
+        value,
+        type,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Configuration Settings
         DELETE /services/{version}/config/types/{type}/values/{value}
@@ -1108,9 +1387,9 @@ class OGGRestAPI:
 
         Parameters:
             value (str): Value name, an alpha-numeric character followed by up to 63 alpha-numeric
-                characters, '_', ':' or '-'. Example: value_example
-            type (str):  Example: type_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                characters, '_', ':' or '-'. Required. Example: value_example
+            type (str): Required. Example: type_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1133,7 +1412,11 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections
-    def list_connections(self, version='v2', raw_response=False):
+    def list_connections(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         GET /services/{version}/connections
@@ -1141,7 +1424,7 @@ class OGGRestAPI:
             connection of the form 'domain.alias' is created.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1160,7 +1443,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}
-    def delete_connection(self, connection, version='v2', raw_response=False):
+    def delete_connection(
+        self,
+        connection,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         DELETE /services/{version}/connections/{connection}
@@ -1168,8 +1456,8 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1190,7 +1478,14 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}
-    def replace_connection(self, connection, data=None, version='v2', raw_response=False):
+    def replace_connection(
+        self,
+        connection,
+        credentials=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         PUT /services/{version}/connections/{connection}
@@ -1198,9 +1493,12 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            credentials (dict): Credentials for database. Required if not included in `data`. Example:
+                credentials_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1213,6 +1511,13 @@ class OGGRestAPI:
                     }
                 }
             )
+
+            client.replace_connection(
+                connection='MYCONN',
+                credentials={
+                    "alias": "oggadmin"
+                }
+            )
         """
         path_params = {
             "connection": connection,
@@ -1223,11 +1528,22 @@ class OGGRestAPI:
             "/services/{version}/connections/{connection}",
             path_params=path_params,
             data=data,
+            body_params={
+                "credentials": credentials,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/connections/{connection}
-    def create_connection(self, connection, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_connection(
+        self,
+        connection,
+        credentials=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Database
         POST /services/{version}/connections/{connection}
@@ -1236,9 +1552,12 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            credentials (dict): Credentials for database. Required if not included in `data`. Example:
+                credentials_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -1254,6 +1573,14 @@ class OGGRestAPI:
                     }
                 }
             )
+
+            client.create_connection(
+                connection='MYCONN',
+                credentials={
+                    "domain": "OracleGoldenGate",
+                    "alias": "oggadmin"
+                }
+            )
         """
         path_params = {
             "connection": connection,
@@ -1264,12 +1591,20 @@ class OGGRestAPI:
             "/services/{version}/connections/{connection}",
             path_params=path_params,
             data=data,
+            body_params={
+                "credentials": credentials,
+            },
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/connections/{connection}
-    def retrieve_connection(self, connection, version='v2', raw_response=False):
+    def retrieve_connection(
+        self,
+        connection,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         GET /services/{version}/connections/{connection}
@@ -1277,8 +1612,8 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1299,7 +1634,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/activeTransactions
-    def retrieve_active_transaction_details(self, connection, version='v2', raw_response=False):
+    def retrieve_active_transaction_details(
+        self,
+        connection,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         GET /services/{version}/connections/{connection}/activeTransactions
@@ -1307,8 +1647,8 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1329,7 +1669,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/databases
-    def retrieve_database_names(self, connection, version='v2', raw_response=False):
+    def retrieve_database_names(
+        self,
+        connection,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         GET /services/{version}/connections/{connection}/databases
@@ -1337,8 +1682,8 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1359,17 +1704,23 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/databases/{database}
-    def retrieve_database_schemas(self, database, connection, version='v2', raw_response=False):
+    def retrieve_database_schemas(
+        self,
+        database,
+        connection,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         GET /services/{version}/connections/{connection}/databases/{database}
         Retrieve names of schemas in the database.
 
         Parameters:
-            database (str): Database name. Example: database_example
+            database (str): Database name. Required. Example: database_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1392,18 +1743,25 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/databases/{database}/{schema}
-    def retrieve_database_tables(self, schema, database, connection, version='v2', raw_response=False):
+    def retrieve_database_tables(
+        self,
+        schema,
+        database,
+        connection,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         GET /services/{version}/connections/{connection}/databases/{database}/{schema}
         Retrieve names of tables in the schema.
 
         Parameters:
-            schema (str): Schema name in the database. Example: schema_example
-            database (str): Database name. Example: database_example
+            schema (str): Schema name in the database. Required. Example: schema_example
+            database (str): Database name. Required. Example: database_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1428,19 +1786,27 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/databases/{database}/{schema}/{table}
-    def retrieve_database_table_details(self, table, schema, database, connection, version='v2', raw_response=False):
+    def retrieve_database_table_details(
+        self,
+        table,
+        schema,
+        database,
+        connection,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         GET /services/{version}/connections/{connection}/databases/{database}/{schema}/{table}
         Retrieve details for a table in the schema.
 
         Parameters:
-            table (str): Table name in the database. Example: table_example
-            schema (str): Schema name in the database. Example: schema_example
-            database (str): Database name. Example: database_example
+            table (str): Table name in the database. Required. Example: table_example
+            schema (str): Schema name in the database. Required. Example: schema_example
+            database (str): Database name. Required. Example: database_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1467,20 +1833,29 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/databases/{database}/{schema}/{table}/instantiationCsn
-    def manage_instantiation_csn(self, table, schema, database, connection, data=None, version='v2', raw_response=False):
+    def manage_instantiation_csn(
+        self,
+        table,
+        schema,
+        database,
+        connection,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         POST /services/{version}/connections/{connection}/databases/{database}/{schema}/{table}/instantiationCsn
         Manage the instantiation CSN for filtering.
 
         Parameters:
-            table (str): Table name in the database. Example: table_example
-            schema (str): Schema name in the database. Example: schema_example
-            database (str): Database name. Example: database_example
+            table (str): Table name in the database. Required. Example: table_example
+            schema (str): Schema name in the database. Required. Example: schema_example
+            database (str): Database name. Required. Example: database_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
+                name 'domain.alias' exists. Required. Example: MYCONN
             data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1512,7 +1887,16 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/checkpoint
-    def manage_checkpoint_tables(self, connection, data=None, version='v2', raw_response=False):
+    def manage_checkpoint_tables(
+        self,
+        connection,
+        operation=None,
+        name=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Database
         POST /services/{version}/connections/{connection}/tables/checkpoint
@@ -1520,11 +1904,16 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            operation (str): Required if not included in `data`. Example: operation_example
+            name (str): Required if not included in `data`. Example: name_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.manage_checkpoint_tables(
@@ -1533,6 +1922,12 @@ class OGGRestAPI:
                     "operation": "add",
                     "name": "oggadmin.checkpoints"
                 }
+            )
+
+            client.manage_checkpoint_tables(
+                connection='MYCONN',
+                operation='add',
+                name='oggadmin.checkpoints'
             )
         """
         path_params = {
@@ -1544,11 +1939,21 @@ class OGGRestAPI:
             "/services/{version}/connections/{connection}/tables/checkpoint",
             path_params=path_params,
             data=data,
+            body_params={
+                "operation": operation,
+                "name": name,
+            },
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/heartbeat
-    def retrieve_heartbeat_table(self, connection, version='v2', raw_response=False):
+    def retrieve_heartbeat_table(
+        self,
+        connection,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         GET /services/{version}/connections/{connection}/tables/heartbeat
@@ -1556,8 +1961,8 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1578,7 +1983,21 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/heartbeat
-    def create_heartbeat_table(self, connection, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_heartbeat_table(
+        self,
+        connection,
+        frequency=None,
+        retentionTime=None,
+        purgeFrequency=None,
+        partitioned=None,
+        targetOnly=None,
+        trackingExtractRestart=None,
+        upgrade=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Database
         POST /services/{version}/connections/{connection}/tables/heartbeat
@@ -1586,9 +2005,24 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            frequency (int): Interval, in seconds, at which the heartbeat table is updated. Example:
+                frequency_example
+            retentionTime (int): Heartbeats older than this retention time (in days) will be deleted from
+                the heartbeat table. Example: retentionTime_example
+            purgeFrequency (int): Interval, in days, at which the heartbeat history table is purged.
+                Example: purgeFrequency_example
+            partitioned (bool): Whether the heartbeat history table is partitioned or not. Example:
+                partitioned_example
+            targetOnly (bool): Boolean value to enable or disable supplemental logging and the scheduler job
+                for updating heartbeat seed and heartbeat tables. Example: targetOnly_example
+            trackingExtractRestart (bool): Whether current heartbeat table setup is tracking extract restart
+                position or not. Example: trackingExtractRestart_example
+            upgrade (bool): Boolean value to detect when to upgrade the heartbeat tables. Example:
+                upgrade_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -1601,6 +2035,17 @@ class OGGRestAPI:
                     "frequency": 60
                 }
             )
+
+            client.create_heartbeat_table(
+                connection='MYCONN',
+                frequency=60,
+                retentionTime=None,
+                purgeFrequency=None,
+                partitioned=None,
+                targetOnly=None,
+                trackingExtractRestart=None,
+                upgrade=None
+            )
         """
         path_params = {
             "connection": connection,
@@ -1611,12 +2056,34 @@ class OGGRestAPI:
             "/services/{version}/connections/{connection}/tables/heartbeat",
             path_params=path_params,
             data=data,
+            body_params={
+                "frequency": frequency,
+                "retentionTime": retentionTime,
+                "purgeFrequency": purgeFrequency,
+                "partitioned": partitioned,
+                "targetOnly": targetOnly,
+                "trackingExtractRestart": trackingExtractRestart,
+                "upgrade": upgrade,
+            },
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/heartbeat
-    def update_heartbeat_table(self, connection, data=None, version='v2', raw_response=False):
+    def update_heartbeat_table(
+        self,
+        connection,
+        frequency=None,
+        retentionTime=None,
+        purgeFrequency=None,
+        partitioned=None,
+        targetOnly=None,
+        trackingExtractRestart=None,
+        upgrade=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         PATCH /services/{version}/connections/{connection}/tables/heartbeat
@@ -1624,9 +2091,24 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            frequency (int): Interval, in seconds, at which the heartbeat table is updated. Example:
+                frequency_example
+            retentionTime (int): Heartbeats older than this retention time (in days) will be deleted from
+                the heartbeat table. Example: retentionTime_example
+            purgeFrequency (int): Interval, in days, at which the heartbeat history table is purged.
+                Example: purgeFrequency_example
+            partitioned (bool): Whether the heartbeat history table is partitioned or not. Example:
+                partitioned_example
+            targetOnly (bool): Boolean value to enable or disable supplemental logging and the scheduler job
+                for updating heartbeat seed and heartbeat tables. Example: targetOnly_example
+            trackingExtractRestart (bool): Whether current heartbeat table setup is tracking extract restart
+                position or not. Example: trackingExtractRestart_example
+            upgrade (bool): Boolean value to detect when to upgrade the heartbeat tables. Example:
+                upgrade_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1636,6 +2118,17 @@ class OGGRestAPI:
                 data={
                     "purgeFrequency": 2
                 }
+            )
+
+            client.update_heartbeat_table(
+                connection='MYCONN',
+                frequency=None,
+                retentionTime=None,
+                purgeFrequency=2,
+                partitioned=None,
+                targetOnly=None,
+                trackingExtractRestart=None,
+                upgrade=None
             )
         """
         path_params = {
@@ -1647,11 +2140,25 @@ class OGGRestAPI:
             "/services/{version}/connections/{connection}/tables/heartbeat",
             path_params=path_params,
             data=data,
+            body_params={
+                "frequency": frequency,
+                "retentionTime": retentionTime,
+                "purgeFrequency": purgeFrequency,
+                "partitioned": partitioned,
+                "targetOnly": targetOnly,
+                "trackingExtractRestart": trackingExtractRestart,
+                "upgrade": upgrade,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/heartbeat
-    def delete_heartbeat_table(self, connection, version='v2', raw_response=False):
+    def delete_heartbeat_table(
+        self,
+        connection,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         DELETE /services/{version}/connections/{connection}/tables/heartbeat
@@ -1659,8 +2166,8 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1681,17 +2188,23 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/heartbeat/{process}
-    def retrieve_process_heartbeat_records(self, process, connection, version='v2', raw_response=False):
+    def retrieve_process_heartbeat_records(
+        self,
+        process,
+        connection,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         GET /services/{version}/connections/{connection}/tables/heartbeat/{process}
         Retrieve heartbeat table entries for an extract or replicat group.
 
         Parameters:
-            process (str): The name of the extract or replicat process. Example: process_example
+            process (str): The name of the extract or replicat process. Required. Example: process_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1714,17 +2227,23 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/heartbeat/{process}
-    def delete_process_heartbeat_records(self, process, connection, version='v2', raw_response=False):
+    def delete_process_heartbeat_records(
+        self,
+        process,
+        connection,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         DELETE /services/{version}/connections/{connection}/tables/heartbeat/{process}
         Delete heartbeat table entries for an extract or replicat group.
 
         Parameters:
-            process (str): The name of the extract or replicat process. Example: process_example
+            process (str): The name of the extract or replicat process. Required. Example: process_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1747,7 +2266,15 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/trace
-    def manage_trace_tables(self, connection, data=None, version='v2', raw_response=False):
+    def manage_trace_tables(
+        self,
+        connection,
+        operation=None,
+        name=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         POST /services/{version}/connections/{connection}/tables/trace
@@ -1755,9 +2282,12 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            operation (str): Required if not included in `data`. Example: operation_example
+            name (str): Required if not included in `data`. Example: name_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1769,6 +2299,12 @@ class OGGRestAPI:
                     "name": "oggadmin.trace01"
                 }
             )
+
+            client.manage_trace_tables(
+                connection='MYCONN',
+                operation='add',
+                name='oggadmin.trace01'
+            )
         """
         path_params = {
             "connection": connection,
@@ -1779,11 +2315,22 @@ class OGGRestAPI:
             "/services/{version}/connections/{connection}/tables/trace",
             path_params=path_params,
             data=data,
+            body_params={
+                "operation": operation,
+                "name": name,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/connections/{connection}/trandata/procedure
-    def manage_procedural_supplemental_logging(self, connection, data=None, version='v2', raw_response=False):
+    def manage_procedural_supplemental_logging(
+        self,
+        connection,
+        operation=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         POST /services/{version}/connections/{connection}/trandata/procedure
@@ -1791,9 +2338,11 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                name 'domain.alias' exists. Required. Example: MYCONN
+            operation (str): Required if not included in `data`. Example: operation_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1803,6 +2352,11 @@ class OGGRestAPI:
                 data={
                     "operation": "info"
                 }
+            )
+
+            client.manage_procedural_supplemental_logging(
+                connection='MYCONN',
+                operation='info'
             )
         """
         path_params = {
@@ -1814,11 +2368,20 @@ class OGGRestAPI:
             "/services/{version}/connections/{connection}/trandata/procedure",
             path_params=path_params,
             data=data,
+            body_params={
+                "operation": operation,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/connections/{connection}/trandata/schema
-    def manage_schema_supplemental_logging(self, connection, data=None, version='v2', raw_response=False):
+    def manage_schema_supplemental_logging(
+        self,
+        connection,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         POST /services/{version}/connections/{connection}/trandata/schema
@@ -1826,9 +2389,9 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
+                name 'domain.alias' exists. Required. Example: MYCONN
             data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1854,7 +2417,13 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/trandata/table
-    def manage_table_supplemental_logging(self, connection, data=None, version='v2', raw_response=False):
+    def manage_table_supplemental_logging(
+        self,
+        connection,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Database
         POST /services/{version}/connections/{connection}/trandata/table
@@ -1862,9 +2431,9 @@ class OGGRestAPI:
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Example: MYCONN
+                name 'domain.alias' exists. Required. Example: MYCONN
             data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1890,14 +2459,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content
-    def static_files(self, version='v2', ogg_service='', raw_response=False):
+    def static_files(
+        self,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Content Requests
         GET /services/{version}/content
         Top level file list.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -1920,15 +2494,21 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content/{a}
-    def static_files_a(self, a, version='v2', ogg_service='', raw_response=False):
+    def static_files_a(
+        self,
+        a,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Content Requests
         GET /services/{version}/content/{a}
         Return the contents of file described by the provided path.
 
         Parameters:
-            a (str): Content file described by the provided path. Example: a_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            a (str): Content file described by the provided path. Required. Example: a_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -1953,16 +2533,23 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content/{a}/{b}
-    def static_files_a_b(self, b, a, version='v2', ogg_service='', raw_response=False):
+    def static_files_a_b(
+        self,
+        b,
+        a,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Content Requests
         GET /services/{version}/content/{a}/{b}
         Return the contents of file described by the provided path.
 
         Parameters:
-            b (str): Content file described by the provided path. Example: b_example
-            a (str): Content file described by the provided path. Example: a_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            b (str): Content file described by the provided path. Required. Example: b_example
+            a (str): Content file described by the provided path. Required. Example: a_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -1989,17 +2576,25 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content/{a}/{b}/{c}
-    def static_files_a_b_c(self, c, b, a, version='v2', ogg_service='', raw_response=False):
+    def static_files_a_b_c(
+        self,
+        c,
+        b,
+        a,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Content Requests
         GET /services/{version}/content/{a}/{b}/{c}
         Return the contents of file described by the provided path.
 
         Parameters:
-            c (str): Content file described by the provided path. Example: c_example
-            b (str): Content file described by the provided path. Example: b_example
-            a (str): Content file described by the provided path. Example: a_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            c (str): Content file described by the provided path. Required. Example: c_example
+            b (str): Content file described by the provided path. Required. Example: b_example
+            a (str): Content file described by the provided path. Required. Example: a_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2028,18 +2623,27 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content/{a}/{b}/{c}/{d}
-    def static_files_a_b_c_d(self, d, c, b, a, version='v2', ogg_service='', raw_response=False):
+    def static_files_a_b_c_d(
+        self,
+        d,
+        c,
+        b,
+        a,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Content Requests
         GET /services/{version}/content/{a}/{b}/{c}/{d}
         Return the contents of file described by the provided path.
 
         Parameters:
-            d (str): Content file described by the provided path. Example: d_example
-            c (str): Content file described by the provided path. Example: c_example
-            b (str): Content file described by the provided path. Example: b_example
-            a (str): Content file described by the provided path. Example: a_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            d (str): Content file described by the provided path. Required. Example: d_example
+            c (str): Content file described by the provided path. Required. Example: c_example
+            b (str): Content file described by the provided path. Required. Example: b_example
+            a (str): Content file described by the provided path. Required. Example: a_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2070,19 +2674,29 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content/{a}/{b}/{c}/{d}/{e}
-    def static_files_a_b_c_d_e(self, e, d, c, b, a, version='v2', ogg_service='', raw_response=False):
+    def static_files_a_b_c_d_e(
+        self,
+        e,
+        d,
+        c,
+        b,
+        a,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Content Requests
         GET /services/{version}/content/{a}/{b}/{c}/{d}/{e}
         Return the contents of file described by the provided path.
 
         Parameters:
-            e (str): Content file described by the provided path. Example: e_example
-            d (str): Content file described by the provided path. Example: d_example
-            c (str): Content file described by the provided path. Example: c_example
-            b (str): Content file described by the provided path. Example: b_example
-            a (str): Content file described by the provided path. Example: a_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            e (str): Content file described by the provided path. Required. Example: e_example
+            d (str): Content file described by the provided path. Required. Example: d_example
+            c (str): Content file described by the provided path. Required. Example: c_example
+            b (str): Content file described by the provided path. Required. Example: b_example
+            a (str): Content file described by the provided path. Required. Example: a_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2115,20 +2729,31 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content/{a}/{b}/{c}/{d}/{e}/{f}
-    def static_files_a_b_c_d_e_f(self, f, e, d, c, b, a, version='v2', ogg_service='', raw_response=False):
+    def static_files_a_b_c_d_e_f(
+        self,
+        f,
+        e,
+        d,
+        c,
+        b,
+        a,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Content Requests
         GET /services/{version}/content/{a}/{b}/{c}/{d}/{e}/{f}
         Return the contents of file described by the provided path.
 
         Parameters:
-            f (str): Content file described by the provided path. Example: f_example
-            e (str): Content file described by the provided path. Example: e_example
-            d (str): Content file described by the provided path. Example: d_example
-            c (str): Content file described by the provided path. Example: c_example
-            b (str): Content file described by the provided path. Example: b_example
-            a (str): Content file described by the provided path. Example: a_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            f (str): Content file described by the provided path. Required. Example: f_example
+            e (str): Content file described by the provided path. Required. Example: e_example
+            d (str): Content file described by the provided path. Required. Example: d_example
+            c (str): Content file described by the provided path. Required. Example: c_example
+            b (str): Content file described by the provided path. Required. Example: b_example
+            a (str): Content file described by the provided path. Required. Example: a_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2163,21 +2788,33 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content/{a}/{b}/{c}/{d}/{e}/{f}/{g}
-    def static_files_a_b_c_d_e_f_g(self, g, f, e, d, c, b, a, version='v2', ogg_service='', raw_response=False):
+    def static_files_a_b_c_d_e_f_g(
+        self,
+        g,
+        f,
+        e,
+        d,
+        c,
+        b,
+        a,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Content Requests
         GET /services/{version}/content/{a}/{b}/{c}/{d}/{e}/{f}/{g}
         Return the contents of file described by the provided path.
 
         Parameters:
-            g (str): Content file described by the provided path. Example: g_example
-            f (str): Content file described by the provided path. Example: f_example
-            e (str): Content file described by the provided path. Example: e_example
-            d (str): Content file described by the provided path. Example: d_example
-            c (str): Content file described by the provided path. Example: c_example
-            b (str): Content file described by the provided path. Example: b_example
-            a (str): Content file described by the provided path. Example: a_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            g (str): Content file described by the provided path. Required. Example: g_example
+            f (str): Content file described by the provided path. Required. Example: f_example
+            e (str): Content file described by the provided path. Required. Example: e_example
+            d (str): Content file described by the provided path. Required. Example: d_example
+            c (str): Content file described by the provided path. Required. Example: c_example
+            b (str): Content file described by the provided path. Required. Example: b_example
+            a (str): Content file described by the provided path. Required. Example: a_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2214,22 +2851,35 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content/{a}/{b}/{c}/{d}/{e}/{f}/{g}/{h}
-    def static_files_a_b_c_d_e_f_g_h(self, h, g, f, e, d, c, b, a, version='v2', ogg_service='', raw_response=False):
+    def static_files_a_b_c_d_e_f_g_h(
+        self,
+        h,
+        g,
+        f,
+        e,
+        d,
+        c,
+        b,
+        a,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Content Requests
         GET /services/{version}/content/{a}/{b}/{c}/{d}/{e}/{f}/{g}/{h}
         Return the contents of file described by the provided path.
 
         Parameters:
-            h (str): Content file described by the provided path. Example: h_example
-            g (str): Content file described by the provided path. Example: g_example
-            f (str): Content file described by the provided path. Example: f_example
-            e (str): Content file described by the provided path. Example: e_example
-            d (str): Content file described by the provided path. Example: d_example
-            c (str): Content file described by the provided path. Example: c_example
-            b (str): Content file described by the provided path. Example: b_example
-            a (str): Content file described by the provided path. Example: a_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            h (str): Content file described by the provided path. Required. Example: h_example
+            g (str): Content file described by the provided path. Required. Example: g_example
+            f (str): Content file described by the provided path. Required. Example: f_example
+            e (str): Content file described by the provided path. Required. Example: e_example
+            d (str): Content file described by the provided path. Required. Example: d_example
+            c (str): Content file described by the provided path. Required. Example: c_example
+            b (str): Content file described by the provided path. Required. Example: b_example
+            a (str): Content file described by the provided path. Required. Example: a_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2268,23 +2918,37 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content/{a}/{b}/{c}/{d}/{e}/{f}/{g}/{h}/{i}
-    def static_files_a_b_c_d_e_f_g_h_i(self, d, f, e, a, i, b, g, h, c, version='v2', ogg_service='', raw_response=False):
+    def static_files_a_b_c_d_e_f_g_h_i(
+        self,
+        d,
+        f,
+        e,
+        a,
+        i,
+        b,
+        g,
+        h,
+        c,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Content Requests
         GET /services/{version}/content/{a}/{b}/{c}/{d}/{e}/{f}/{g}/{h}/{i}
         Return the contents of file described by the provided path.
 
         Parameters:
-            d (str): Content file described by the provided path. Example: d_example
-            f (str): Content file described by the provided path. Example: f_example
-            e (str): Content file described by the provided path. Example: e_example
-            a (str): Content file described by the provided path. Example: a_example
-            i (str): Content file described by the provided path. Example: i_example
-            b (str): Content file described by the provided path. Example: b_example
-            g (str): Content file described by the provided path. Example: g_example
-            h (str): Content file described by the provided path. Example: h_example
-            c (str): Content file described by the provided path. Example: c_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            d (str): Content file described by the provided path. Required. Example: d_example
+            f (str): Content file described by the provided path. Required. Example: f_example
+            e (str): Content file described by the provided path. Required. Example: e_example
+            a (str): Content file described by the provided path. Required. Example: a_example
+            i (str): Content file described by the provided path. Required. Example: i_example
+            b (str): Content file described by the provided path. Required. Example: b_example
+            g (str): Content file described by the provided path. Required. Example: g_example
+            h (str): Content file described by the provided path. Required. Example: h_example
+            c (str): Content file described by the provided path. Required. Example: c_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2325,24 +2989,39 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content/{a}/{b}/{c}/{d}/{e}/{f}/{g}/{h}/{i}/{j}
-    def static_files_a_b_c_d_e_f_g_h_i_j(self, d, f, e, j, a, i, b, g, h, c, version='v2', ogg_service='', raw_response=False):
+    def static_files_a_b_c_d_e_f_g_h_i_j(
+        self,
+        d,
+        f,
+        e,
+        j,
+        a,
+        i,
+        b,
+        g,
+        h,
+        c,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Content Requests
         GET /services/{version}/content/{a}/{b}/{c}/{d}/{e}/{f}/{g}/{h}/{i}/{j}
         Return the contents of file described by the provided path.
 
         Parameters:
-            d (str): Content file described by the provided path. Example: d_example
-            f (str): Content file described by the provided path. Example: f_example
-            e (str): Content file described by the provided path. Example: e_example
-            j (str): Content file described by the provided path. Example: j_example
-            a (str): Content file described by the provided path. Example: a_example
-            i (str): Content file described by the provided path. Example: i_example
-            b (str): Content file described by the provided path. Example: b_example
-            g (str): Content file described by the provided path. Example: g_example
-            h (str): Content file described by the provided path. Example: h_example
-            c (str): Content file described by the provided path. Example: c_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            d (str): Content file described by the provided path. Required. Example: d_example
+            f (str): Content file described by the provided path. Required. Example: f_example
+            e (str): Content file described by the provided path. Required. Example: e_example
+            j (str): Content file described by the provided path. Required. Example: j_example
+            a (str): Content file described by the provided path. Required. Example: a_example
+            i (str): Content file described by the provided path. Required. Example: i_example
+            b (str): Content file described by the provided path. Required. Example: b_example
+            g (str): Content file described by the provided path. Required. Example: g_example
+            h (str): Content file described by the provided path. Required. Example: h_example
+            c (str): Content file described by the provided path. Required. Example: c_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2385,14 +3064,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/credentials
-    def list_domains(self, version='v2', raw_response=False):
+    def list_domains(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Credentials
         GET /services/{version}/credentials
         Retrieve the list of domains in the credential store.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2411,15 +3094,20 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/credentials/{domain}
-    def list_domain_aliases(self, domain, version='v2', raw_response=False):
+    def list_domain_aliases(
+        self,
+        domain,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Credentials
         GET /services/{version}/credentials/{domain}
         Retrieve the list of aliases for a domain in the credential store.
 
         Parameters:
-            domain (str): Credential store domain name. Example: OracleGoldenGate
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            domain (str): Credential store domain name. Required. Example: OracleGoldenGate
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2440,7 +3128,13 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/credentials/{domain}/{alias}
-    def retrieve_alias(self, alias, domain, version='v2', raw_response=False):
+    def retrieve_alias(
+        self,
+        alias,
+        domain,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Credentials
         GET /services/{version}/credentials/{domain}/{alias}
@@ -2448,9 +3142,9 @@ class OGGRestAPI:
             will not be returned.
 
         Parameters:
-            alias (str): Credential store alias. Example: ggnorth
-            domain (str): Credential store domain name. Example: OracleGoldenGate
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            alias (str): Credential store alias. Required. Example: ggnorth
+            domain (str): Credential store domain name. Required. Example: OracleGoldenGate
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2473,17 +3167,30 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/credentials/{domain}/{alias}
-    def create_alias(self, alias, domain, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_alias(
+        self,
+        alias,
+        domain,
+        userid=None,
+        password=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Credentials
         POST /services/{version}/credentials/{domain}/{alias}
         Create a new alias in the credential store.
 
         Parameters:
-            alias (str): Credential store alias. Example: ggnorth
-            domain (str): Credential store domain name. Example: OracleGoldenGate
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            alias (str): Credential store alias. Required. Example: ggnorth
+            domain (str): Credential store domain name. Required. Example: OracleGoldenGate
+            userid (str):  Example: userid_example
+            password (str):  Example: password_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -2498,6 +3205,13 @@ class OGGRestAPI:
                     "password": "oggadmin"
                 }
             )
+
+            client.create_alias(
+                alias='ggnorth',
+                domain='OracleGoldenGate',
+                userid='oggadmin',
+                password='oggadmin'
+            )
         """
         path_params = {
             "alias": alias,
@@ -2509,22 +3223,38 @@ class OGGRestAPI:
             "/services/{version}/credentials/{domain}/{alias}",
             path_params=path_params,
             data=data,
+            body_params={
+                "userid": userid,
+                "password": password,
+            },
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/credentials/{domain}/{alias}
-    def replace_alias(self, alias, domain, data=None, version='v2', raw_response=False):
+    def replace_alias(
+        self,
+        alias,
+        domain,
+        userid=None,
+        password=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Credentials
         PUT /services/{version}/credentials/{domain}/{alias}
         Update an alias in the credential store.
 
         Parameters:
-            alias (str): Credential store alias. Example: ggnorth
-            domain (str): Credential store domain name. Example: OracleGoldenGate
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            alias (str): Credential store alias. Required. Example: ggnorth
+            domain (str): Credential store domain name. Required. Example: OracleGoldenGate
+            userid (str):  Example: userid_example
+            password (str):  Example: password_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2537,6 +3267,13 @@ class OGGRestAPI:
                     "password": "newPassword"
                 }
             )
+
+            client.replace_alias(
+                alias='ggnorth',
+                domain='OracleGoldenGate',
+                userid='oggadmin',
+                password='newPassword'
+            )
         """
         path_params = {
             "alias": alias,
@@ -2548,20 +3285,30 @@ class OGGRestAPI:
             "/services/{version}/credentials/{domain}/{alias}",
             path_params=path_params,
             data=data,
+            body_params={
+                "userid": userid,
+                "password": password,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/credentials/{domain}/{alias}
-    def delete_alias(self, alias, domain, version='v2', raw_response=False):
+    def delete_alias(
+        self,
+        alias,
+        domain,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Credentials
         DELETE /services/{version}/credentials/{domain}/{alias}
         Delete an alias from the credential store.
 
         Parameters:
-            alias (str): Credential store alias. Example: ggnorth
-            domain (str): Credential store domain name. Example: OracleGoldenGate
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            alias (str): Credential store alias. Required. Example: ggnorth
+            domain (str): Credential store domain name. Required. Example: OracleGoldenGate
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2584,16 +3331,22 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/credentials/{domain}/{alias}/valid
-    def validate(self, alias, domain, version='v2', raw_response=False):
+    def validate(
+        self,
+        alias,
+        domain,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Credentials
         GET /services/{version}/credentials/{domain}/{alias}/valid
         Check validity of credentials and return database credentials details.
 
         Parameters:
-            alias (str): Credential store alias. Example: ggnorth
-            domain (str): Credential store domain name. Example: OracleGoldenGate
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            alias (str): Credential store alias. Required. Example: ggnorth
+            domain (str): Credential store domain name. Required. Example: OracleGoldenGate
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2616,14 +3369,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/currentuser
-    def retrieve_information(self, version='v2', ogg_service='', raw_response=False):
+    def retrieve_information(
+        self,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/User Information
         GET /services/{version}/currentuser
         Return the current user's identity information encoded in the request.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2646,14 +3404,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/currentuser
-    def reset_information(self, version='v2', ogg_service='', raw_response=False):
+    def reset_information(
+        self,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/User Information
         DELETE /services/{version}/currentuser
         Remove the current user's identity information encoded in the request.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2676,14 +3439,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments
-    def list_deployments(self, version='v2', raw_response=False):
+    def list_deployments(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Deployments
         GET /services/{version}/deployments
         Retrieve the collection of Oracle GoldenGate Deployments.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2703,15 +3470,21 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}
-    def retrieve_deployment(self, deployment, version='v2', raw_response=False):
+    def retrieve_deployment(
+        self,
+        deployment,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Deployments
         GET /services/{version}/deployments/{deployment}
         Retrieve the details of a deployment.
 
         Parameters:
-            deployment (str): Name for the Oracle GoldenGate deployment. Example: deployment_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2733,16 +3506,50 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}
-    def create_deployment(self, deployment, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_deployment(
+        self,
+        deployment,
+        oggHome=None,
+        oggDataHome=None,
+        oggConfHome=None,
+        enabled=None,
+        id=None,
+        oggSslHome=None,
+        status=None,
+        oggEtcHome=None,
+        oggVarHome=None,
+        environment=None,
+        passwordRegex=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Service Manager/Deployments
         POST /services/{version}/deployments/{deployment}
         Create a new Oracle GoldenGate deployment.
 
         Parameters:
-            deployment (str): Name for the Oracle GoldenGate deployment. Example: deployment_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            oggHome (str): The deployment's home directory. Example: oggHome_example
+            oggDataHome (str): The deployment's var/data user data directory. Example: oggDataHome_example
+            oggConfHome (str): The deployment's configuration directory. Example: oggConfHome_example
+            enabled (bool): Indicates the deployment is managed by the Service Manager. Example:
+                enabled_example
+            id (str): An identifier that uniquely identifies this deployment. Example: id_example
+            oggSslHome (str): The deployment's SSL configuration directory. Example: oggSslHome_example
+            status (str): Indicates the status of the deployment. Example: status_example
+            oggEtcHome (str): The deployment's etc configuration directory. Example: oggEtcHome_example
+            oggVarHome (str): The deployment's var user data directory. Example: oggVarHome_example
+            environment (list): Additional environment variables for the deployment. Example:
+                environment_example
+            passwordRegex (str): The regular expression that new user passwords must match. Example:
+                passwordRegex_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -2757,6 +3564,26 @@ class OGGRestAPI:
                     "enabled": False
                 }
             )
+
+            client.create_deployment(
+                deployment='deployment_example',
+                oggHome='/home/oracle/oggSecondary',
+                oggDataHome=None,
+                oggConfHome=None,
+                enabled=False,
+                id=None,
+                oggSslHome=None,
+                status=None,
+                oggEtcHome='/home/oracle/ogg/etc',
+                oggVarHome=None,
+                environment=[
+                    {
+                        "name": None,
+                        "value": None
+                    }
+                ],
+                passwordRegex=None
+            )
         """
         path_params = {
             "deployment": deployment,
@@ -2767,22 +3594,68 @@ class OGGRestAPI:
             "/services/{version}/deployments/{deployment}",
             path_params=path_params,
             data=data,
+            body_params={
+                "oggHome": oggHome,
+                "oggDataHome": oggDataHome,
+                "oggConfHome": oggConfHome,
+                "enabled": enabled,
+                "id": id,
+                "oggSslHome": oggSslHome,
+                "status": status,
+                "oggEtcHome": oggEtcHome,
+                "oggVarHome": oggVarHome,
+                "environment": environment,
+                "passwordRegex": passwordRegex,
+            },
             ogg_service="ServiceManager",
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}
-    def update_deployment(self, deployment, data=None, version='v2', raw_response=False):
+    def update_deployment(
+        self,
+        deployment,
+        oggHome=None,
+        oggDataHome=None,
+        oggConfHome=None,
+        enabled=None,
+        id=None,
+        oggSslHome=None,
+        status=None,
+        oggEtcHome=None,
+        oggVarHome=None,
+        environment=None,
+        passwordRegex=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Deployments
         PATCH /services/{version}/deployments/{deployment}
         Update the properties of a deployment.
 
         Parameters:
-            deployment (str): Name for the Oracle GoldenGate deployment. Example: deployment_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            oggHome (str): The deployment's home directory. Example: oggHome_example
+            oggDataHome (str): The deployment's var/data user data directory. Example: oggDataHome_example
+            oggConfHome (str): The deployment's configuration directory. Example: oggConfHome_example
+            enabled (bool): Indicates the deployment is managed by the Service Manager. Example:
+                enabled_example
+            id (str): An identifier that uniquely identifies this deployment. Example: id_example
+            oggSslHome (str): The deployment's SSL configuration directory. Example: oggSslHome_example
+            status (str): Indicates the status of the deployment. Example: status_example
+            oggEtcHome (str): The deployment's etc configuration directory. Example: oggEtcHome_example
+            oggVarHome (str): The deployment's var user data directory. Example: oggVarHome_example
+            environment (list): Additional environment variables for the deployment. Example:
+                environment_example
+            passwordRegex (str): The regular expression that new user passwords must match. Example:
+                passwordRegex_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2792,6 +3665,26 @@ class OGGRestAPI:
                 data={
                     "enabled": True
                 }
+            )
+
+            client.update_deployment(
+                deployment='deployment_example',
+                oggHome=None,
+                oggDataHome=None,
+                oggConfHome=None,
+                enabled=True,
+                id=None,
+                oggSslHome=None,
+                status=None,
+                oggEtcHome=None,
+                oggVarHome=None,
+                environment=[
+                    {
+                        "name": None,
+                        "value": None
+                    }
+                ],
+                passwordRegex=None
             )
         """
         path_params = {
@@ -2803,20 +3696,39 @@ class OGGRestAPI:
             "/services/{version}/deployments/{deployment}",
             path_params=path_params,
             data=data,
+            body_params={
+                "oggHome": oggHome,
+                "oggDataHome": oggDataHome,
+                "oggConfHome": oggConfHome,
+                "enabled": enabled,
+                "id": id,
+                "oggSslHome": oggSslHome,
+                "status": status,
+                "oggEtcHome": oggEtcHome,
+                "oggVarHome": oggVarHome,
+                "environment": environment,
+                "passwordRegex": passwordRegex,
+            },
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}
-    def remove_deployment(self, deployment, version='v2', raw_response=False):
+    def remove_deployment(
+        self,
+        deployment,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Deployments
         DELETE /services/{version}/deployments/{deployment}
         Delete a deployment.
 
         Parameters:
-            deployment (str): Name for the Oracle GoldenGate deployment. Example: deployment_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2838,15 +3750,21 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services
-    def list_services(self, deployment, version='v2', raw_response=False):
+    def list_services(
+        self,
+        deployment,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Services
         GET /services/{version}/deployments/{deployment}/services
         Retrieve the collection of Oracle GoldenGate Services in a deployment.
 
         Parameters:
-            deployment (str): Name for the Oracle GoldenGate deployment. Example: deployment_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2868,16 +3786,23 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}
-    def retrieve_service(self, service, deployment, version='v2', raw_response=False):
+    def retrieve_service(
+        self,
+        service,
+        deployment,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Services
         GET /services/{version}/deployments/{deployment}/services/{service}
         Retrieve the details of a service in an Oracle GoldenGate deployment.
 
         Parameters:
-            service (str): Name of the service. Example: service_example
-            deployment (str): Name for the Oracle GoldenGate deployment. Example: deployment_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            service (str): Name of the service. Required. Example: service_example
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2901,7 +3826,24 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}
-    def create_service(self, service, deployment, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_service(
+        self,
+        service,
+        deployment,
+        config=None,
+        quiet=None,
+        enabled=None,
+        id=None,
+        status=None,
+        critical=None,
+        restart=None,
+        locked=None,
+        configForce=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Service Manager/Services
         POST /services/{version}/deployments/{deployment}/services/{service}
@@ -2909,10 +3851,23 @@ class OGGRestAPI:
             succeed.
 
         Parameters:
-            service (str): Name of the service. Example: service_example
-            deployment (str): Name for the Oracle GoldenGate deployment. Example: deployment_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            service (str): Name of the service. Required. Example: service_example
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            config (dict): Service configuration data. Example: config_example
+            quiet (bool): Start the service in quiet mode. Example: quiet_example
+            enabled (bool): Indicates the service is managed by the Service Manager. Example:
+                enabled_example
+            id (str): An identifier that uniquely identifies this service. Example: id_example
+            status (str): Indicates the status of the service. Example: status_example
+            critical (bool): Indicates the service is critical to the deployment. Example: critical_example
+            restart (dict): Control how the service is restarted if it terminates. Example: restart_example
+            locked (bool): Indicates the service is locked by a security administrator and cannot be
+                started. Example: locked_example
+            configForce (bool): Force the configuration data. Example: configForce_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -2938,6 +3893,38 @@ class OGGRestAPI:
                     "enabled": False
                 }
             )
+
+            client.create_service(
+                service='service_example',
+                deployment='deployment_example',
+                config={
+                    "network": {
+                        "serviceListeningPort": 11001
+                    },
+                    "security": False,
+                    "authorizationEnabled": True,
+                    "defaultSynchronousWait": 30,
+                    "asynchronousOperationEnabled": True,
+                    "legacyProtocolEnabled": True,
+                    "taskManagerEnabled": True
+                },
+                quiet=None,
+                enabled=False,
+                id=None,
+                status=None,
+                critical=None,
+                restart={
+                    "enabled": None,
+                    "onSuccess": None,
+                    "delay": None,
+                    "retries": None,
+                    "window": None,
+                    "disableOnFailure": None,
+                    "failures": None
+                },
+                locked=None,
+                configForce=None
+            )
         """
         path_params = {
             "service": service,
@@ -2949,23 +3936,63 @@ class OGGRestAPI:
             "/services/{version}/deployments/{deployment}/services/{service}",
             path_params=path_params,
             data=data,
+            body_params={
+                "config": config,
+                "quiet": quiet,
+                "enabled": enabled,
+                "id": id,
+                "status": status,
+                "critical": critical,
+                "restart": restart,
+                "locked": locked,
+                "configForce": configForce,
+            },
             ogg_service="ServiceManager",
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}
-    def update_service_properties(self, service, deployment, data=None, version='v2', raw_response=False):
+    def update_service_properties(
+        self,
+        service,
+        deployment,
+        config=None,
+        quiet=None,
+        enabled=None,
+        id=None,
+        status=None,
+        critical=None,
+        restart=None,
+        locked=None,
+        configForce=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Services
         PATCH /services/{version}/deployments/{deployment}/services/{service}
         Update the properties of a service.
 
         Parameters:
-            service (str): Name of the service. Example: service_example
-            deployment (str): Name for the Oracle GoldenGate deployment. Example: deployment_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            service (str): Name of the service. Required. Example: service_example
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            config (dict): Service configuration data. Example: config_example
+            quiet (bool): Start the service in quiet mode. Example: quiet_example
+            enabled (bool): Indicates the service is managed by the Service Manager. Example:
+                enabled_example
+            id (str): An identifier that uniquely identifies this service. Example: id_example
+            status (str): Indicates the status of the service. Example: status_example
+            critical (bool): Indicates the service is critical to the deployment. Example: critical_example
+            restart (dict): Control how the service is restarted if it terminates. Example: restart_example
+            locked (bool): Indicates the service is locked by a security administrator and cannot be
+                started. Example: locked_example
+            configForce (bool): Force the configuration data. Example: configForce_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2978,6 +4005,67 @@ class OGGRestAPI:
                     "status": "running"
                 }
             )
+
+            client.update_service_properties(
+                service='service_example',
+                deployment='deployment_example',
+                config={
+                    "security": None,
+                    "umask": None,
+                    "asynchronousOperationEnabled": None,
+                    "serviceDiscoveryEnabled": None,
+                    "hstsEnabled": None,
+                    "network": {
+                        "serviceListeningPort": None
+                    },
+                    "legacyProtocolEnabled": None,
+                    "authorizationEnabled": None,
+                    "securityDetails": {
+                        "network": {
+                            "common": {
+                                "id": None,
+                                "fipsEnabled": None
+                            },
+                            "inbound": None,
+                            "outbound": None
+                        }
+                    },
+                    "csrfHeaderProtectionEnabled": None,
+                    "contentUrlRewrite": None,
+                    "authorizationDetails": {
+                        "sessionDurationSecs": None,
+                        "useMovingExpirationWindow": None,
+                        "movingExpirationWindowSecs": None,
+                        "common": {
+                            "allow": [
+                                None
+                            ],
+                            "customAuthorizationEnabled": None
+                        }
+                    },
+                    "taskManagerEnabled": None,
+                    "hstsDetails": None,
+                    "cors": None,
+                    "defaultSynchronousWait": None,
+                    "csrfTokenProtectionEnabled": None
+                },
+                quiet=None,
+                enabled=True,
+                id=None,
+                status='running',
+                critical=None,
+                restart={
+                    "enabled": None,
+                    "onSuccess": None,
+                    "delay": None,
+                    "retries": None,
+                    "window": None,
+                    "disableOnFailure": None,
+                    "failures": None
+                },
+                locked=None,
+                configForce=None
+            )
         """
         path_params = {
             "service": service,
@@ -2989,21 +4077,39 @@ class OGGRestAPI:
             "/services/{version}/deployments/{deployment}/services/{service}",
             path_params=path_params,
             data=data,
+            body_params={
+                "config": config,
+                "quiet": quiet,
+                "enabled": enabled,
+                "id": id,
+                "status": status,
+                "critical": critical,
+                "restart": restart,
+                "locked": locked,
+                "configForce": configForce,
+            },
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}
-    def remove_service(self, service, deployment, version='v2', raw_response=False):
+    def remove_service(
+        self,
+        service,
+        deployment,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Services
         DELETE /services/{version}/deployments/{deployment}/services/{service}
         Remove a service from an Oracle GoldenGate deployment.
 
         Parameters:
-            service (str): Name of the service. Example: service_example
-            deployment (str): Name for the Oracle GoldenGate deployment. Example: deployment_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            service (str): Name of the service. Required. Example: service_example
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3027,16 +4133,23 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}/logs
-    def list_service_logs(self, service, deployment, version='v2', raw_response=False):
+    def list_service_logs(
+        self,
+        service,
+        deployment,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Services
         GET /services/{version}/deployments/{deployment}/services/{service}/logs
         Retrieve the set of logs for the service
 
         Parameters:
-            service (str): Name of the service. Example: service_example
-            deployment (str): Name for the Oracle GoldenGate deployment. Example: deployment_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            service (str): Name of the service. Required. Example: service_example
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3060,16 +4173,23 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}/logs/default
-    def default_log(self, service, deployment, version='v2', raw_response=False):
+    def default_log(
+        self,
+        service,
+        deployment,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Services
         GET /services/{version}/deployments/{deployment}/services/{service}/logs/default
         Retrieve the service log
 
         Parameters:
-            service (str): Name of the service. Example: service_example
-            deployment (str): Name for the Oracle GoldenGate deployment. Example: deployment_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            service (str): Name of the service. Required. Example: service_example
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3093,14 +4213,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/enckeys
-    def list_encryption_keys(self, version='v2', raw_response=False):
+    def list_encryption_keys(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Encryption Keys
         GET /services/{version}/enckeys
         Retrieve the names of all encryption keys
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3119,15 +4243,20 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/enckeys/{keyName}
-    def retrieve_encryption_key(self, keyName, version='v2', raw_response=False):
+    def retrieve_encryption_key(
+        self,
+        keyName,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Encryption Keys
         GET /services/{version}/enckeys/{keyName}
         Retrieve details for an Encryption Key.
 
         Parameters:
-            keyName (str): The name of the Encryption Key. Example: keyName_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            keyName (str): The name of the Encryption Key. Required. Example: keyName_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3148,16 +4277,27 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/enckeys/{keyName}
-    def create_encryption_key(self, keyName, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_encryption_key(
+        self,
+        keyName,
+        bitLength=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Encryption Keys
         POST /services/{version}/enckeys/{keyName}
         Create an Encryption Key.
 
         Parameters:
-            keyName (str): The name of the Encryption Key. Example: keyName_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            keyName (str): The name of the Encryption Key. Required. Example: keyName_example
+            bitLength (str): Length of the encryption key, in bits. Required if not included in `data`.
+                Example: bitLength_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -3170,6 +4310,11 @@ class OGGRestAPI:
                     "bitLength": 128
                 }
             )
+
+            client.create_encryption_key(
+                keyName='keyName_example',
+                bitLength=128
+            )
         """
         path_params = {
             "keyName": keyName,
@@ -3180,20 +4325,28 @@ class OGGRestAPI:
             "/services/{version}/enckeys/{keyName}",
             path_params=path_params,
             data=data,
+            body_params={
+                "bitLength": bitLength,
+            },
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/enckeys/{keyName}
-    def delete_encryption_key(self, keyName, version='v2', raw_response=False):
+    def delete_encryption_key(
+        self,
+        keyName,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Encryption Keys
         DELETE /services/{version}/enckeys/{keyName}
         Delete an Encryption Key
 
         Parameters:
-            keyName (str): The name of the Encryption Key. Example: keyName_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            keyName (str): The name of the Encryption Key. Required. Example: keyName_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3214,16 +4367,27 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/enckeys/{keyName}/encrypt
-    def encrypt_data(self, keyName, data=None, version='v2', raw_response=False):
+    def encrypt_data(
+        self,
+        keyName,
+        encoding=None,
+        data_1=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Encryption Keys
         POST /services/{version}/enckeys/{keyName}/encrypt
         Encrypt data using the Encryption Key.
 
         Parameters:
-            keyName (str): The name of the Encryption Key. Example: keyName_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            keyName (str): The name of the Encryption Key. Required. Example: keyName_example
+            encoding (str): Encoding to use for encrypted data in response. Example: encoding_example
+            data (str): Data to be encrypted
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3233,6 +4397,12 @@ class OGGRestAPI:
                 data={
                     "data": "plaintext-password"
                 }
+            )
+
+            client.encrypt_data(
+                keyName='keyName_example',
+                encoding=None,
+                data_1='plaintext-password'
             )
         """
         path_params = {
@@ -3244,18 +4414,26 @@ class OGGRestAPI:
             "/services/{version}/enckeys/{keyName}/encrypt",
             path_params=path_params,
             data=data,
+            body_params={
+                "encoding": encoding,
+                "data": data_1,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/extracts
-    def list_extracts(self, version='v2', raw_response=False):
+    def list_extracts(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Extracts
         GET /services/{version}/extracts
         Retrieve the collection of Extract processes
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3274,7 +4452,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}
-    def retrieve_extract(self, extract, version='v2', raw_response=False):
+    def retrieve_extract(
+        self,
+        extract,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Extracts
         GET /services/{version}/extracts/{extract}
@@ -3282,8 +4465,9 @@ class OGGRestAPI:
 
         Parameters:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
-                character followed by up to seven alpha-numeric characters. Example: extract_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                character followed by up to seven alpha-numeric characters. Required. Example:
+                extract_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3304,7 +4488,31 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}
-    def create_extract(self, extract, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_extract(
+        self,
+        extract,
+        begin=None,
+        passive=None,
+        config=None,
+        encryptionProfile=None,
+        status=None,
+        critical=None,
+        rollover=None,
+        targets=None,
+        managedProcessSettings=None,
+        intent=None,
+        registration=None,
+        source=None,
+        type=None,
+        miningCredentials=None,
+        alias=None,
+        credentials=None,
+        description=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Extracts
         POST /services/{version}/extracts/{extract}
@@ -3312,9 +4520,31 @@ class OGGRestAPI:
 
         Parameters:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
-                character followed by up to seven alpha-numeric characters. Example: extract_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                character followed by up to seven alpha-numeric characters. Required. Example:
+                extract_example
+            begin (dict): Starting point for data processing. Example: begin_example
+            passive (bool): Passive extract controlled by an alias on the target. Example: passive_example
+            config (list):  Example: config_example
+            encryptionProfile (dict):  Example: encryptionProfile_example
+            status (str): Oracle GoldenGate Process Status. Example: status_example
+            critical (bool): Indicates the extract is critical to the deployment. Example: critical_example
+            rollover (str): Causes Extract to increment to the next file in the trail sequence when
+                restarting. Example: rollover_example
+            targets (list): Targets for captured data. Example: targets_example
+            managedProcessSettings (dict): Control how the ER process is managed by the Administration
+                Server. Example: managedProcessSettings_example
+            intent (str): Intent for data capture workflow. Example: intent_example
+            registration (dict): Registration with the source database. Example: registration_example
+            source (dict): Source of data to process. Example: source_example
+            type (str): OGG Extract process type (read-only). Example: type_example
+            miningCredentials (dict): Credentials for downstream mining database. Example:
+                miningCredentials_example
+            alias (dict):  Example: ggnorth
+            credentials (dict): Credentials for source database. Example: credentials_example
+            description (str): Description for the process. Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -3345,6 +4575,51 @@ class OGGRestAPI:
                     ]
                 }
             )
+
+            client.create_extract(
+                extract='extract_example',
+                begin='now',
+                passive=None,
+                config=[
+                    "Extract     EXT2",
+                    "ExtTrail    X2 Format Release 12.3",
+                    "UseridAlias oggadmin",
+                    "Table       oggadmin.*;"
+                ],
+                encryptionProfile=None,
+                status=None,
+                critical=None,
+                rollover=None,
+                targets=[
+                    {
+                        "name": "X2"
+                    }
+                ],
+                managedProcessSettings=None,
+                intent=None,
+                registration='default',
+                source={
+                    "tranlogs": "integrated"
+                },
+                type=None,
+                miningCredentials=None,
+                alias={
+                    "name": None,
+                    "manager": {
+                        "host": None,
+                        "port": None
+                    },
+                    "proxy": {
+                        "host": None,
+                        "port": None,
+                        "credentials": None
+                    }
+                },
+                credentials={
+                    "alias": "oggadmin"
+                },
+                description=None
+            )
         """
         path_params = {
             "extract": extract,
@@ -3355,12 +4630,54 @@ class OGGRestAPI:
             "/services/{version}/extracts/{extract}",
             path_params=path_params,
             data=data,
+            body_params={
+                "begin": begin,
+                "passive": passive,
+                "config": config,
+                "encryptionProfile": encryptionProfile,
+                "status": status,
+                "critical": critical,
+                "rollover": rollover,
+                "targets": targets,
+                "managedProcessSettings": managedProcessSettings,
+                "intent": intent,
+                "registration": registration,
+                "source": source,
+                "type": type,
+                "miningCredentials": miningCredentials,
+                "alias": alias,
+                "credentials": credentials,
+                "description": description,
+            },
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/extracts/{extract}
-    def update_extract(self, extract, data=None, version='v2', raw_response=False):
+    def update_extract(
+        self,
+        extract,
+        begin=None,
+        passive=None,
+        config=None,
+        encryptionProfile=None,
+        status=None,
+        critical=None,
+        rollover=None,
+        targets=None,
+        managedProcessSettings=None,
+        intent=None,
+        registration=None,
+        source=None,
+        type=None,
+        miningCredentials=None,
+        alias=None,
+        credentials=None,
+        description=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Extracts
         PATCH /services/{version}/extracts/{extract}
@@ -3369,9 +4686,31 @@ class OGGRestAPI:
 
         Parameters:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
-                character followed by up to seven alpha-numeric characters. Example: extract_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                character followed by up to seven alpha-numeric characters. Required. Example:
+                extract_example
+            begin (dict): Starting point for data processing. Example: begin_example
+            passive (bool): Passive extract controlled by an alias on the target. Example: passive_example
+            config (list):  Example: config_example
+            encryptionProfile (dict):  Example: encryptionProfile_example
+            status (str): Oracle GoldenGate Process Status. Example: status_example
+            critical (bool): Indicates the extract is critical to the deployment. Example: critical_example
+            rollover (str): Causes Extract to increment to the next file in the trail sequence when
+                restarting. Example: rollover_example
+            targets (list): Targets for captured data. Example: targets_example
+            managedProcessSettings (dict): Control how the ER process is managed by the Administration
+                Server. Example: managedProcessSettings_example
+            intent (str): Intent for data capture workflow. Example: intent_example
+            registration (dict): Registration with the source database. Example: registration_example
+            source (dict): Source of data to process. Example: source_example
+            type (str): OGG Extract process type (read-only). Example: type_example
+            miningCredentials (dict): Credentials for downstream mining database. Example:
+                miningCredentials_example
+            alias (dict):  Example: ggnorth
+            credentials (dict): Credentials for source database. Example: credentials_example
+            description (str): Description for the process. Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3381,6 +4720,42 @@ class OGGRestAPI:
                 data={
                     "status": "running"
                 }
+            )
+
+            client.update_extract(
+                extract='extract_example',
+                begin=None,
+                passive=None,
+                config=[
+                    None
+                ],
+                encryptionProfile=None,
+                status='running',
+                critical=None,
+                rollover=None,
+                targets=[
+                    None
+                ],
+                managedProcessSettings=None,
+                intent=None,
+                registration=None,
+                source=None,
+                type=None,
+                miningCredentials=None,
+                alias={
+                    "name": None,
+                    "manager": {
+                        "host": None,
+                        "port": None
+                    },
+                    "proxy": {
+                        "host": None,
+                        "port": None,
+                        "credentials": None
+                    }
+                },
+                credentials=None,
+                description=None
             )
         """
         path_params = {
@@ -3392,11 +4767,35 @@ class OGGRestAPI:
             "/services/{version}/extracts/{extract}",
             path_params=path_params,
             data=data,
+            body_params={
+                "begin": begin,
+                "passive": passive,
+                "config": config,
+                "encryptionProfile": encryptionProfile,
+                "status": status,
+                "critical": critical,
+                "rollover": rollover,
+                "targets": targets,
+                "managedProcessSettings": managedProcessSettings,
+                "intent": intent,
+                "registration": registration,
+                "source": source,
+                "type": type,
+                "miningCredentials": miningCredentials,
+                "alias": alias,
+                "credentials": credentials,
+                "description": description,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/extracts/{extract}
-    def delete_extract(self, extract, version='v2', raw_response=False):
+    def delete_extract(
+        self,
+        extract,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Extracts
         DELETE /services/{version}/extracts/{extract}
@@ -3404,8 +4803,9 @@ class OGGRestAPI:
 
         Parameters:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
-                character followed by up to seven alpha-numeric characters. Example: extract_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                character followed by up to seven alpha-numeric characters. Required. Example:
+                extract_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3426,7 +4826,13 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/command
-    def issue_command_extract(self, extract, data=None, version='v2', raw_response=False):
+    def issue_command_extract(
+        self,
+        extract,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Extracts
         POST /services/{version}/extracts/{extract}/command
@@ -3434,9 +4840,10 @@ class OGGRestAPI:
 
         Parameters:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
-                character followed by up to seven alpha-numeric characters. Example: extract_example
+                character followed by up to seven alpha-numeric characters. Required. Example:
+                extract_example
             data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3462,7 +4869,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info
-    def list_information_types_extract(self, extract, version='v2', raw_response=False):
+    def list_information_types_extract(
+        self,
+        extract,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Extracts
         GET /services/{version}/extracts/{extract}/info
@@ -3470,8 +4882,9 @@ class OGGRestAPI:
 
         Parameters:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
-                character followed by up to seven alpha-numeric characters. Example: extract_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                character followed by up to seven alpha-numeric characters. Required. Example:
+                extract_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3492,7 +4905,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/checkpoints
-    def retrieve_checkpoints_extract(self, extract, version='v2', raw_response=False):
+    def retrieve_checkpoints_extract(
+        self,
+        extract,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Extracts
         GET /services/{version}/extracts/{extract}/info/checkpoints
@@ -3500,8 +4918,9 @@ class OGGRestAPI:
 
         Parameters:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
-                character followed by up to seven alpha-numeric characters. Example: extract_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                character followed by up to seven alpha-numeric characters. Required. Example:
+                extract_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3522,7 +4941,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/history
-    def retrieve_history_extract(self, extract, version='v2', raw_response=False):
+    def retrieve_history_extract(
+        self,
+        extract,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Extracts
         GET /services/{version}/extracts/{extract}/info/history
@@ -3530,8 +4954,9 @@ class OGGRestAPI:
 
         Parameters:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
-                character followed by up to seven alpha-numeric characters. Example: extract_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                character followed by up to seven alpha-numeric characters. Required. Example:
+                extract_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3552,7 +4977,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/reports
-    def list_reports_extract(self, extract, version='v2', raw_response=False):
+    def list_reports_extract(
+        self,
+        extract,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Extracts
         GET /services/{version}/extracts/{extract}/info/reports
@@ -3560,8 +4990,9 @@ class OGGRestAPI:
 
         Parameters:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
-                character followed by up to seven alpha-numeric characters. Example: extract_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                character followed by up to seven alpha-numeric characters. Required. Example:
+                extract_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3582,7 +5013,13 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/reports/{report}
-    def retrieve_report_extract(self, report, extract, version='v2', raw_response=False):
+    def retrieve_report_extract(
+        self,
+        report,
+        extract,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Extracts
         GET /services/{version}/extracts/{extract}/info/reports/{report}
@@ -3590,10 +5027,11 @@ class OGGRestAPI:
 
         Parameters:
             report (str): The name of the report, which is the extract name, followed by an optional
-                revision number and '.rpt'. Example: report_example
+                revision number and '.rpt'. Required. Example: report_example
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
-                character followed by up to seven alpha-numeric characters. Example: extract_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                character followed by up to seven alpha-numeric characters. Required. Example:
+                extract_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3616,7 +5054,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/status
-    def retrieve_status_extract(self, extract, version='v2', raw_response=False):
+    def retrieve_status_extract(
+        self,
+        extract,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Extracts
         GET /services/{version}/extracts/{extract}/info/status
@@ -3624,8 +5067,9 @@ class OGGRestAPI:
 
         Parameters:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
-                character followed by up to seven alpha-numeric characters. Example: extract_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                character followed by up to seven alpha-numeric characters. Required. Example:
+                extract_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3646,13 +5090,17 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/exttrails
-    def get_list_deployment_extracts_with_their_trail_files(self, version='v2', raw_response=False):
+    def get_list_deployment_extracts_with_their_trail_files(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Distribution Service
         GET /services/{version}/exttrails
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3672,14 +5120,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/deployments
-    def retrieve_deployment_list(self, version='v2', raw_response=False):
+    def retrieve_deployment_list(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Installation
         GET /services/{version}/installation/deployments
         Retrieve a list of all Oracle GoldenGate deployments for the installation.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3699,14 +5151,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/services
-    def retrieve_service_list(self, version='v2', raw_response=False):
+    def retrieve_service_list(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Service Manager/Installation
         GET /services/{version}/installation/services
         Retrieve a list of all Oracle GoldenGate services for the installation.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3726,14 +5182,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/logs
-    def list_replication_logs(self, version='v2', raw_response=False):
+    def list_replication_logs(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Logs
         GET /services/{version}/logs
         Retrieve the set of logs for ER processes
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3752,14 +5212,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/logs/events
-    def critical_events(self, version='v2', raw_response=False):
+    def critical_events(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Logs
         GET /services/{version}/logs/events
         This endpoint provides a log of all critical events that occur in replication processes.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3778,15 +5242,21 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/logs/{log}
-    def retrieve_log(self, log, version='v2', ogg_service='', raw_response=False):
+    def retrieve_log(
+        self,
+        log,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Logs
         GET /services/{version}/logs/{log}
         Retrieve an application log
 
         Parameters:
-            log (str): Name of the log. Example: log_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            log (str): Name of the log. Required. Example: log_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -3811,7 +5281,15 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/logs/{log}
-    def modify_log_properties(self, log, data=None, version='v2', ogg_service='', raw_response=False):
+    def modify_log_properties(
+        self,
+        log,
+        enabled=None,
+        data=None,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Logs
         PATCH /services/{version}/logs/{log}
@@ -3820,9 +5298,11 @@ class OGGRestAPI:
             400 Bad Request is returned.
 
         Parameters:
-            log (str): Name of the log. Example: log_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            log (str): Name of the log. Required. Example: log_example
+            enabled (bool): Required if not included in `data`. Example: enabled_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -3836,6 +5316,12 @@ class OGGRestAPI:
                     "enabled": True
                 }
             )
+
+            client.modify_log_properties(
+                log='log_example',
+                ogg_service='adminsrvr',
+                enabled=True
+            )
         """
         path_params = {
             "log": log,
@@ -3846,12 +5332,21 @@ class OGGRestAPI:
             "/services/{version}/logs/{log}",
             path_params=path_params,
             data=data,
+            body_params={
+                "enabled": enabled,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/logs/{log}
-    def reset_log_data(self, log, version='v2', ogg_service='', raw_response=False):
+    def reset_log_data(
+        self,
+        log,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Logs
         DELETE /services/{version}/logs/{log}
@@ -3860,8 +5355,8 @@ class OGGRestAPI:
             400 Bad Request is returned.
 
         Parameters:
-            log (str): Name of the log. Example: log_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            log (str): Name of the log. Required. Example: log_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -3886,14 +5381,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/masterkey
-    def list_versions(self, version='v2', raw_response=False):
+    def list_versions(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Master Keys
         GET /services/{version}/masterkey
         Retrieve all versions of the Master Key
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3912,14 +5411,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/masterkey
-    def create_version(self, version='v2', raw_response=False, if_exists='fail'):
+    def create_version(
+        self,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Master Keys
         POST /services/{version}/masterkey
         Create a new Master Key version
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -3941,15 +5445,20 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/masterkey/{keyVersion}
-    def retrieve_version(self, keyVersion, version='v2', raw_response=False):
+    def retrieve_version(
+        self,
+        keyVersion,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Master Keys
         GET /services/{version}/masterkey/{keyVersion}
         Retrieve a Master Key by version.
 
         Parameters:
-            keyVersion (int): The Master Key version number, 1 to 32767. Example: 1
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            keyVersion (int): The Master Key version number, 1 to 32767. Required. Example: 1
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3970,16 +5479,27 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/masterkey/{keyVersion}
-    def update_version(self, keyVersion, data=None, version='v2', raw_response=False):
+    def update_version(
+        self,
+        keyVersion,
+        created=None,
+        status=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Master Keys
         PATCH /services/{version}/masterkey/{keyVersion}
         Update a Master Key version
 
         Parameters:
-            keyVersion (int): The Master Key version number, 1 to 32767. Example: 1
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            keyVersion (int): The Master Key version number, 1 to 32767. Required. Example: 1
+            created (str):  Example: created_example
+            status (str): Required if not included in `data`. Example: status_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3989,6 +5509,12 @@ class OGGRestAPI:
                 data={
                     "status": "unavailable"
                 }
+            )
+
+            client.update_version(
+                keyVersion=1,
+                created=None,
+                status='unavailable'
             )
         """
         path_params = {
@@ -4000,19 +5526,28 @@ class OGGRestAPI:
             "/services/{version}/masterkey/{keyVersion}",
             path_params=path_params,
             data=data,
+            body_params={
+                "created": created,
+                "status": status,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/masterkey/{keyVersion}
-    def delete_version(self, keyVersion, version='v2', raw_response=False):
+    def delete_version(
+        self,
+        keyVersion,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Master Keys
         DELETE /services/{version}/masterkey/{keyVersion}
         Delete a Master Key version
 
         Parameters:
-            keyVersion (int): The Master Key version number, 1 to 32767. Example: 1
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            keyVersion (int): The Master Key version number, 1 to 32767. Required. Example: 1
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4033,14 +5568,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/messages
-    def retrieve_messages(self, version='v2', raw_response=False):
+    def retrieve_messages(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Messages
         GET /services/{version}/messages
         Retrieve messages from the Oracle GoldenGate deployment.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4059,7 +5598,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/metadata-catalog
-    def retrieve_catalog(self, version='v2', ogg_service='', raw_response=False):
+    def retrieve_catalog(
+        self,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/REST API Catalog
         GET /services/{version}/metadata-catalog
@@ -4067,7 +5611,7 @@ class OGGRestAPI:
             Use this endpoint to retrieve a collection of all items in the catalog.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -4090,7 +5634,13 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/metadata-catalog/{resource}
-    def describe_catalog_item(self, resource, version='v2', ogg_service='', raw_response=False):
+    def describe_catalog_item(
+        self,
+        resource,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/REST API Catalog
         GET /services/{version}/metadata-catalog/{resource}
@@ -4098,8 +5648,8 @@ class OGGRestAPI:
             catalog is obtained using the Retrieve Catalog endpoint.
 
         Parameters:
-            resource (str): Name of the item in the metadata catalog. Example: resource_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            resource (str): Name of the item in the metadata catalog. Required. Example: resource_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -4124,13 +5674,17 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/commands
-    def retrieve_list_commands(self, version='v2', raw_response=False):
+    def retrieve_list_commands(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Commands
         GET /services/{version}/monitoring/commands
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4149,14 +5703,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/commands/execute
-    def execute_command_monitoring(self, data=None, version='v2', raw_response=False):
+    def execute_command_monitoring(
+        self,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Commands
         POST /services/{version}/monitoring/commands/execute
 
         Parameters:
             data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4180,13 +5739,17 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/lastMessageId
-    def retrieve_existing_last_message_id_number(self, version='v2', raw_response=False):
+    def retrieve_existing_last_message_id_number(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Last Message Number
         GET /services/{version}/monitoring/lastMessageId
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4205,13 +5768,17 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/lastStatusChangeId
-    def retrieve_existing_last_status_change_id_number(self, version='v2', raw_response=False):
+    def retrieve_existing_last_status_change_id_number(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Last Status Change Id Number
         GET /services/{version}/monitoring/lastStatusChangeId
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4230,13 +5797,17 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/messages
-    def retrieve_existing_process_messages(self, version='v2', raw_response=False):
+    def retrieve_existing_process_messages(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Messages
         GET /services/{version}/monitoring/messages
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4255,13 +5826,17 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/statusChanges
-    def retrieve_existing_process_status_changes(self, version='v2', raw_response=False):
+    def retrieve_existing_process_status_changes(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Status Changes
         GET /services/{version}/monitoring/statusChanges
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4280,14 +5855,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/{item}/messages
-    def retrieve_existing_process_messages_item(self, item, version='v2', raw_response=False):
+    def retrieve_existing_process_messages_item(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Messages
         GET /services/{version}/monitoring/{item}/messages
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4308,14 +5888,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/{item}/statusChanges
-    def retrieve_existing_process_status_changes_item(self, item, version='v2', raw_response=False):
+    def retrieve_existing_process_status_changes_item(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Status Changes
         GET /services/{version}/monitoring/{item}/statusChanges
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4336,13 +5921,17 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/processes
-    def retrieve_existing_process_information_processes(self, version='v2', raw_response=False):
+    def retrieve_existing_process_information_processes(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/processes
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4361,14 +5950,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/batchSqlStatistics
-    def retrieve_existing_integrated_replicat_batch_sql_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_integrated_replicat_batch_sql_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Replicat Metrics
         GET /services/{version}/mpoints/{item}/batchSqlStatistics
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4389,14 +5983,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/cacheStatistics
-    def retrieve_existing_cache_manager_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_cache_manager_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/{item}/cacheStatistics
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4417,14 +6016,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/configurationEr
-    def retrieve_existing_basic_configuration_information_for_extract_and_replicat(self, item, version='v2', raw_response=False):
+    def retrieve_existing_basic_configuration_information_for_extract_and_replicat(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/ER Metrics
         GET /services/{version}/mpoints/{item}/configurationEr
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4445,14 +6049,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/configurationManager
-    def retrieve_existing_basic_configuration_information_for_manager_and_services(self, item, version='v2', raw_response=False):
+    def retrieve_existing_basic_configuration_information_for_manager_and_services(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/ER Metrics
         GET /services/{version}/mpoints/{item}/configurationManager
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4473,14 +6082,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/coordinationReplicat
-    def retrieve_existing_coordinated_replicat_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_coordinated_replicat_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Replicat Metrics
         GET /services/{version}/mpoints/{item}/coordinationReplicat
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4501,14 +6115,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/currentInflightTransactions
-    def retrieve_existing_in_flight_transaction_information(self, item, version='v2', raw_response=False):
+    def retrieve_existing_in_flight_transaction_information(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Extract Metrics
         GET /services/{version}/mpoints/{item}/currentInflightTransactions
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4529,14 +6148,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/databaseInOut
-    def retrieve_existing_database_information(self, item, version='v2', raw_response=False):
+    def retrieve_existing_database_information(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/{item}/databaseInOut
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4557,14 +6181,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/dependencyStats
-    def retrieve_existing_statistics_about_dependencies(self, item, version='v2', raw_response=False):
+    def retrieve_existing_statistics_about_dependencies(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Replicat Metrics
         GET /services/{version}/mpoints/{item}/dependencyStats
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4585,14 +6214,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/distsrvrChunkStats
-    def retrieve_existing_distribution_server_chunk_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_distribution_server_chunk_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Service Metrics
         GET /services/{version}/mpoints/{item}/distsrvrChunkStats
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4613,14 +6247,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/distsrvrNetworkStats
-    def retrieve_existing_distribution_server_network_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_distribution_server_network_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Service Metrics
         GET /services/{version}/mpoints/{item}/distsrvrNetworkStats
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4641,14 +6280,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/distsrvrPathStats
-    def retrieve_existing_distribution_server_path_statistics_distsrvrPathStats(self, item, version='v2', raw_response=False):
+    def retrieve_existing_distribution_server_path_statistics_distsrvrPathStats(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Service Metrics
         GET /services/{version}/mpoints/{item}/distsrvrPathStats
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4669,14 +6313,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/distsrvrTableStats
-    def retrieve_existing_distribution_server_path_statistics_distsrvrTableStats(self, item, version='v2', raw_response=False):
+    def retrieve_existing_distribution_server_path_statistics_distsrvrTableStats(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Service Metrics
         GET /services/{version}/mpoints/{item}/distsrvrTableStats
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4697,14 +6346,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/networkStatistics
-    def retrieve_existing_network_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_network_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/{item}/networkStatistics
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4725,14 +6379,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/parallelReplicat
-    def retrieve_existing_parallel_replicat_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_parallel_replicat_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Replicat Metrics
         GET /services/{version}/mpoints/{item}/parallelReplicat
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4753,14 +6412,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/pmsrvrProcStats
-    def retrieve_existing_pm_service_monitored_process_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_pm_service_monitored_process_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Service Metrics
         GET /services/{version}/mpoints/{item}/pmsrvrProcStats
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4781,14 +6445,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/pmsrvrStats
-    def retrieve_existing_pm_service_collector_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_pm_service_collector_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Service Metrics
         GET /services/{version}/mpoints/{item}/pmsrvrStats
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4809,14 +6478,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/pmsrvrWorkerStats
-    def retrieve_existing_pm_service_worker_thread_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_pm_service_worker_thread_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Service Metrics
         GET /services/{version}/mpoints/{item}/pmsrvrWorkerStats
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4837,14 +6511,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/positionEr
-    def retrieve_existing_checkpoint_position_information(self, item, version='v2', raw_response=False):
+    def retrieve_existing_checkpoint_position_information(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/ER Metrics
         GET /services/{version}/mpoints/{item}/positionEr
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4865,14 +6544,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/process
-    def retrieve_existing_process_information_item(self, item, version='v2', raw_response=False):
+    def retrieve_existing_process_information_item(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/{item}/process
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4893,14 +6577,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/processPerformance
-    def retrieve_existing_process_performance_resource_utilization_information(self, item, version='v2', raw_response=False):
+    def retrieve_existing_process_performance_resource_utilization_information(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/{item}/processPerformance
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4921,14 +6610,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/queueBucketStatistics
-    def retrieve_existing_queue_bucket_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_queue_bucket_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/{item}/queueBucketStatistics
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4949,14 +6643,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/queueStatistics
-    def retrieve_existing_queue_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_queue_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/{item}/queueStatistics
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4977,14 +6676,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/recvsrvrStats
-    def retrieve_existing_receiver_service_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_receiver_service_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Service Metrics
         GET /services/{version}/mpoints/{item}/recvsrvrStats
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5005,14 +6709,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsExtract
-    def retrieve_existing_extract_database_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_extract_database_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Extract Metrics
         GET /services/{version}/mpoints/{item}/statisticsExtract
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5033,14 +6742,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsProcedureExtract
-    def retrieve_existing_extract_database_statistics_by_procedure_feature(self, item, version='v2', raw_response=False):
+    def retrieve_existing_extract_database_statistics_by_procedure_feature(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Extract Metrics
         GET /services/{version}/mpoints/{item}/statisticsProcedureExtract
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5061,14 +6775,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsProcedureReplicat
-    def retrieve_existing_database_statistics_by_procedure_feature(self, item, version='v2', raw_response=False):
+    def retrieve_existing_database_statistics_by_procedure_feature(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Replicat Metrics
         GET /services/{version}/mpoints/{item}/statisticsProcedureReplicat
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5089,14 +6808,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsReplicat
-    def retrieve_existing_replicat_database_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_replicat_database_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Replicat Metrics
         GET /services/{version}/mpoints/{item}/statisticsReplicat
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5117,14 +6841,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsTableExtract
-    def retrieve_existing_extract_database_statistics_by_table(self, item, version='v2', raw_response=False):
+    def retrieve_existing_extract_database_statistics_by_table(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Extract Metrics
         GET /services/{version}/mpoints/{item}/statisticsTableExtract
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5145,14 +6874,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsTableReplicat
-    def retrieve_existing_replicat_database_statistics_by_table(self, item, version='v2', raw_response=False):
+    def retrieve_existing_replicat_database_statistics_by_table(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Replicat Metrics
         GET /services/{version}/mpoints/{item}/statisticsTableReplicat
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5173,14 +6907,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/superpoolStatistics
-    def retrieve_existing_super_pool_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_super_pool_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/{item}/superpoolStatistics
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5201,14 +6940,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/threadPerformance
-    def retrieve_existing_process_thread_resource_utilization_information(self, item, version='v2', raw_response=False):
+    def retrieve_existing_process_thread_resource_utilization_information(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/{item}/threadPerformance
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5229,14 +6973,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/trailInput
-    def retrieve_existing_input_trail_file_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_input_trail_file_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/{item}/trailInput
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5257,14 +7006,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/trailOutput
-    def retrieve_existing_output_trail_file_statistics(self, item, version='v2', raw_response=False):
+    def retrieve_existing_output_trail_file_statistics(
+        self,
+        item,
+        version='v2',
+        raw_response=False
+    ):
         """
         Performance Metrics Server/Process Metrics
         GET /services/{version}/mpoints/{item}/trailOutput
 
         Parameters:
-            item (str):  Example: item_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            item (str): Required. Example: item_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5285,14 +7039,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/oggerr
-    def retrieve_list_message_codes(self, version='v2', ogg_service='', raw_response=False):
+    def retrieve_list_message_codes(
+        self,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Message Codes
         GET /services/{version}/oggerr
         Retrieve all message codes from the Oracle GoldenGate deployment.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -5315,15 +7074,21 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/oggerr/{message}
-    def retrieve_message_explanation(self, message, version='v2', ogg_service='', raw_response=False):
+    def retrieve_message_explanation(
+        self,
+        message,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Message Codes
         GET /services/{version}/oggerr/{message}
         Retrieve a detailed explanation for an Oracle GoldenGate message.
 
         Parameters:
-            message (str): The Oracle GoldenGate Message Code, OGG-99999. Example: message_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            message (str): The Oracle GoldenGate Message Code, OGG-99999. Required. Example: message_example
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -5348,14 +7113,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/parameters
-    def list_parameter_names(self, version='v2', raw_response=False):
+    def list_parameter_names(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Parameters
         GET /services/{version}/parameters
         Retrieve names of all known OGG parameters.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5374,15 +7143,20 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/parameters/{parameter}
-    def retrieve_parameter_info(self, parameter, version='v2', raw_response=False):
+    def retrieve_parameter_info(
+        self,
+        parameter,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Parameters
         GET /services/{version}/parameters/{parameter}
         Retrieve details for a parameter.
 
         Parameters:
-            parameter (str): Name of parameter for information request. Example: parameter_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            parameter (str): Name of parameter for information request. Required. Example: parameter_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5403,14 +7177,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats
-    def list_replicats(self, version='v2', raw_response=False):
+    def list_replicats(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Replicats
         GET /services/{version}/replicats
         Retrieve the collection of Replicat processes
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5429,7 +7207,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}
-    def retrieve_replicat(self, replicat, version='v2', raw_response=False):
+    def retrieve_replicat(
+        self,
+        replicat,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Replicats
         GET /services/{version}/replicats/{replicat}
@@ -5437,9 +7220,9 @@ class OGGRestAPI:
 
         Parameters:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
-                alphabetic character followed by up to seven alpha-numeric characters. Example:
+                alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5460,7 +7243,28 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}
-    def create_replicat(self, replicat, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_replicat(
+        self,
+        replicat,
+        begin=None,
+        config=None,
+        synchronized=None,
+        mode=None,
+        encryptionProfile=None,
+        status=None,
+        critical=None,
+        managedProcessSettings=None,
+        intent=None,
+        checkpoint=None,
+        registration=None,
+        source=None,
+        credentials=None,
+        description=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Replicats
         POST /services/{version}/replicats/{replicat}
@@ -5468,10 +7272,27 @@ class OGGRestAPI:
 
         Parameters:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
-                alphabetic character followed by up to seven alpha-numeric characters. Example:
+                alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            begin (dict): Starting point for data processing. Example: begin_example
+            config (list):  Example: config_example
+            synchronized (bool): Indicates that the Replicat is stopped in a synchronized state. Example:
+                synchronized_example
+            mode (dict): Mode of replication. Example: mode_example
+            encryptionProfile (dict):  Example: encryptionProfile_example
+            status (str): Oracle GoldenGate Process Status. Example: status_example
+            critical (bool): Indicates the replicat is critical to the deployment. Example: critical_example
+            managedProcessSettings (dict): Control how the ER process is managed by the Administration
+                Server. Example: managedProcessSettings_example
+            intent (str): Intent for data capture workflow. Example: intent_example
+            checkpoint (dict): Location for checkpoint data. Example: checkpoint_example
+            registration (str): Registration with the target database. Example: registration_example
+            source (dict): Source of data to process. Example: source_example
+            credentials (dict): Credentials for target database. Example: credentials_example
+            description (str): Description for the process. Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -5498,6 +7319,35 @@ class OGGRestAPI:
                     }
                 }
             )
+
+            client.create_replicat(
+                replicat='replicat_example',
+                begin=None,
+                config=[
+                    "Replicat    REP2",
+                    "UseridAlias oggadmin",
+                    "Map         oggadmin.*,",
+                    "  Target    oggadmin.*;"
+                ],
+                synchronized=None,
+                mode=None,
+                encryptionProfile=None,
+                status=None,
+                critical=None,
+                managedProcessSettings=None,
+                intent=None,
+                checkpoint={
+                    "table": "oggadmin.checkpoints"
+                },
+                registration=None,
+                source={
+                    "name": "X2"
+                },
+                credentials={
+                    "alias": "oggadmin"
+                },
+                description=None
+            )
         """
         path_params = {
             "replicat": replicat,
@@ -5508,12 +7358,48 @@ class OGGRestAPI:
             "/services/{version}/replicats/{replicat}",
             path_params=path_params,
             data=data,
+            body_params={
+                "begin": begin,
+                "config": config,
+                "synchronized": synchronized,
+                "mode": mode,
+                "encryptionProfile": encryptionProfile,
+                "status": status,
+                "critical": critical,
+                "managedProcessSettings": managedProcessSettings,
+                "intent": intent,
+                "checkpoint": checkpoint,
+                "registration": registration,
+                "source": source,
+                "credentials": credentials,
+                "description": description,
+            },
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}
-    def update_replicat(self, replicat, data=None, version='v2', raw_response=False):
+    def update_replicat(
+        self,
+        replicat,
+        begin=None,
+        config=None,
+        synchronized=None,
+        mode=None,
+        encryptionProfile=None,
+        status=None,
+        critical=None,
+        managedProcessSettings=None,
+        intent=None,
+        checkpoint=None,
+        registration=None,
+        source=None,
+        credentials=None,
+        description=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Replicats
         PATCH /services/{version}/replicats/{replicat}
@@ -5522,10 +7408,27 @@ class OGGRestAPI:
 
         Parameters:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
-                alphabetic character followed by up to seven alpha-numeric characters. Example:
+                alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            begin (dict): Starting point for data processing. Example: begin_example
+            config (list):  Example: config_example
+            synchronized (bool): Indicates that the Replicat is stopped in a synchronized state. Example:
+                synchronized_example
+            mode (dict): Mode of replication. Example: mode_example
+            encryptionProfile (dict):  Example: encryptionProfile_example
+            status (str): Oracle GoldenGate Process Status. Example: status_example
+            critical (bool): Indicates the replicat is critical to the deployment. Example: critical_example
+            managedProcessSettings (dict): Control how the ER process is managed by the Administration
+                Server. Example: managedProcessSettings_example
+            intent (str): Intent for data capture workflow. Example: intent_example
+            checkpoint (dict): Location for checkpoint data. Example: checkpoint_example
+            registration (str): Registration with the target database. Example: registration_example
+            source (dict): Source of data to process. Example: source_example
+            credentials (dict): Credentials for target database. Example: credentials_example
+            description (str): Description for the process. Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5535,6 +7438,26 @@ class OGGRestAPI:
                 data={
                     "status": "running"
                 }
+            )
+
+            client.update_replicat(
+                replicat='replicat_example',
+                begin=None,
+                config=[
+                    None
+                ],
+                synchronized=None,
+                mode=None,
+                encryptionProfile=None,
+                status='running',
+                critical=None,
+                managedProcessSettings=None,
+                intent=None,
+                checkpoint=None,
+                registration=None,
+                source=None,
+                credentials=None,
+                description=None
             )
         """
         path_params = {
@@ -5546,11 +7469,32 @@ class OGGRestAPI:
             "/services/{version}/replicats/{replicat}",
             path_params=path_params,
             data=data,
+            body_params={
+                "begin": begin,
+                "config": config,
+                "synchronized": synchronized,
+                "mode": mode,
+                "encryptionProfile": encryptionProfile,
+                "status": status,
+                "critical": critical,
+                "managedProcessSettings": managedProcessSettings,
+                "intent": intent,
+                "checkpoint": checkpoint,
+                "registration": registration,
+                "source": source,
+                "credentials": credentials,
+                "description": description,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}
-    def delete_replicat(self, replicat, version='v2', raw_response=False):
+    def delete_replicat(
+        self,
+        replicat,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Replicats
         DELETE /services/{version}/replicats/{replicat}
@@ -5558,9 +7502,9 @@ class OGGRestAPI:
 
         Parameters:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
-                alphabetic character followed by up to seven alpha-numeric characters. Example:
+                alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5581,7 +7525,13 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/command
-    def issue_command_replicat(self, replicat, data=None, version='v2', raw_response=False):
+    def issue_command_replicat(
+        self,
+        replicat,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Replicats
         POST /services/{version}/replicats/{replicat}/command
@@ -5589,10 +7539,10 @@ class OGGRestAPI:
 
         Parameters:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
-                alphabetic character followed by up to seven alpha-numeric characters. Example:
+                alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
             data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5618,7 +7568,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info
-    def list_information_types_replicat(self, replicat, version='v2', raw_response=False):
+    def list_information_types_replicat(
+        self,
+        replicat,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Replicats
         GET /services/{version}/replicats/{replicat}/info
@@ -5626,9 +7581,9 @@ class OGGRestAPI:
 
         Parameters:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
-                alphabetic character followed by up to seven alpha-numeric characters. Example:
+                alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5649,7 +7604,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/checkpoints
-    def retrieve_checkpoints_replicat(self, replicat, version='v2', raw_response=False):
+    def retrieve_checkpoints_replicat(
+        self,
+        replicat,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Replicats
         GET /services/{version}/replicats/{replicat}/info/checkpoints
@@ -5657,9 +7617,9 @@ class OGGRestAPI:
 
         Parameters:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
-                alphabetic character followed by up to seven alpha-numeric characters. Example:
+                alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5680,7 +7640,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/history
-    def retrieve_history_replicat(self, replicat, version='v2', raw_response=False):
+    def retrieve_history_replicat(
+        self,
+        replicat,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Replicats
         GET /services/{version}/replicats/{replicat}/info/history
@@ -5688,9 +7653,9 @@ class OGGRestAPI:
 
         Parameters:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
-                alphabetic character followed by up to seven alpha-numeric characters. Example:
+                alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5711,7 +7676,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/reports
-    def list_reports_replicat(self, replicat, version='v2', raw_response=False):
+    def list_reports_replicat(
+        self,
+        replicat,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Replicats
         GET /services/{version}/replicats/{replicat}/info/reports
@@ -5719,9 +7689,9 @@ class OGGRestAPI:
 
         Parameters:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
-                alphabetic character followed by up to seven alpha-numeric characters. Example:
+                alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5742,7 +7712,13 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/reports/{report}
-    def retrieve_report_replicat(self, report, replicat, version='v2', raw_response=False):
+    def retrieve_report_replicat(
+        self,
+        report,
+        replicat,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Replicats
         GET /services/{version}/replicats/{replicat}/info/reports/{report}
@@ -5750,11 +7726,11 @@ class OGGRestAPI:
 
         Parameters:
             report (str): The name of the report, which is the replicat name, followed by an optional
-                revision number and '.rpt'. Example: report_example
+                revision number and '.rpt'. Required. Example: report_example
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
-                alphabetic character followed by up to seven alpha-numeric characters. Example:
+                alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5777,7 +7753,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/status
-    def retrieve_status_replicat(self, replicat, version='v2', raw_response=False):
+    def retrieve_status_replicat(
+        self,
+        replicat,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Replicats
         GET /services/{version}/replicats/{replicat}/info/status
@@ -5785,9 +7766,9 @@ class OGGRestAPI:
 
         Parameters:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
-                alphabetic character followed by up to seven alpha-numeric characters. Example:
+                alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5808,14 +7789,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/requests
-    def retrieve_background_requests(self, version='v2', ogg_service='', raw_response=False):
+    def retrieve_background_requests(
+        self,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Requests
         GET /services/{version}/requests
         Retrieve the collection of background REST API requests.
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -5838,15 +7824,21 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/requests/{request}
-    def retrieve_request_status(self, request, version='v2', ogg_service='', raw_response=False):
+    def retrieve_request_status(
+        self,
+        request,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Requests
         GET /services/{version}/requests/{request}
         Retrieve the background request status.
 
         Parameters:
-            request (int): Identifier for background request. Example: 1
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            request (int): Identifier for background request. Required. Example: 1
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -5871,15 +7863,21 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/requests/{request}/result
-    def retrieve_request_result(self, request, version='v2', ogg_service='', raw_response=False):
+    def retrieve_request_result(
+        self,
+        request,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
         """
         Common/Requests
         GET /services/{version}/requests/{request}/result
         Retrieve the background request result.
 
         Parameters:
-            request (int): Identifier for background request. Example: 1
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            request (int): Identifier for background request. Required. Example: 1
+            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -5904,13 +7902,17 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources
-    def get_list_distribution_paths_sources(self, version='v2', raw_response=False):
+    def get_list_distribution_paths_sources(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Distribution Service
         GET /services/{version}/sources
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5930,14 +7932,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def delete_existing_oracle_goldengate_distribution_path(self, distpath, version='v2', raw_response=False):
+    def delete_existing_oracle_goldengate_distribution_path(
+        self,
+        distpath,
+        version='v2',
+        raw_response=False
+    ):
         """
         Distribution Service
         DELETE /services/{version}/sources/{distpath}
 
         Parameters:
-            distpath (str):  Example: distpath_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            distpath (str): Required. Example: distpath_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5959,15 +7966,46 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def create_new_oracle_goldengate_distribution_path(self, distpath, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_new_oracle_goldengate_distribution_path(
+        self,
+        distpath,
+        begin=None,
+        name=None,
+        encryptionProfile=None,
+        status=None,
+        targetInitiated=None,
+        ruleset=None,
+        source=None,
+        target=None,
+        options=None,
+        description=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Distribution Service
         POST /services/{version}/sources/{distpath}
 
         Parameters:
-            distpath (str):  Example: distpath_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            distpath (str): Required. Example: distpath_example
+            begin (dict): Starting point for data processing. Example: begin_example
+            name (str): distribution path name. Example: name_example
+            encryptionProfile (str): Name of 'ogg:encryptionProfile' value. Example:
+                encryptionProfile_example
+            status (dict): Oracle GoldenGate Distribution Path Status. Example: status_example
+            targetInitiated (bool): Whether the target endpoint initiates the path. If true, the path needs
+                to be created and modified through Receiver Server, who initiates the connection with
+                Distribution Server. Otherwise, this behavior is reversed. Example: targetInitiated_example
+            ruleset (dict):  Example: ruleset_example
+            source (dict): source endpoint of the path. Example: source_example
+            target (dict): target endpoint of the path. Example: target_example
+            options (dict): options for the distribution path. Example: options_example
+            description (str): Description for the path. Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -5993,6 +8031,49 @@ class OGGRestAPI:
                     "status": "running"
                 }
             )
+
+            client.create_new_oracle_goldengate_distribution_path(
+                distpath='distpath_example',
+                begin={
+                    "sequence": 0,
+                    "offset": 0
+                },
+                name='path1',
+                encryptionProfile=None,
+                status='running',
+                targetInitiated=None,
+                ruleset=None,
+                source={
+                    "uri": "trail://localhost:7999/dirdat/a1"
+                },
+                target={
+                    "uri": "ogg://adc00oye:7999/dirdat/t1"
+                },
+                options={
+                    "tcpSourceTimer": None,
+                    "reportCount": {
+                        "measurementUnit": None,
+                        "count": None,
+                        "rate": None
+                    },
+                    "network": {
+                        "socketOptions": None,
+                        "appOptions": {
+                            "appFlushBytes": None,
+                            "appFlushSecs": None
+                        }
+                    },
+                    "streaming": None,
+                    "critical": None,
+                    "autoRestart": {
+                        "retries": None,
+                        "delay": None
+                    },
+                    "eofDelayCSecs": None,
+                    "checkpointFrequency": None
+                },
+                description='my test distPath'
+            )
         """
         path_params = {
             "distpath": distpath,
@@ -6003,13 +8084,41 @@ class OGGRestAPI:
             "/services/{version}/sources/{distpath}",
             path_params=path_params,
             data=data,
+            body_params={
+                "begin": begin,
+                "name": name,
+                "encryptionProfile": encryptionProfile,
+                "status": status,
+                "targetInitiated": targetInitiated,
+                "ruleset": ruleset,
+                "source": source,
+                "target": target,
+                "options": options,
+                "description": description,
+            },
             ogg_service="distsrvr",
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def update_existing_distribution_path(self, distpath, data=None, version='v2', raw_response=False):
+    def update_existing_distribution_path(
+        self,
+        distpath,
+        begin=None,
+        name=None,
+        encryptionProfile=None,
+        status=None,
+        targetInitiated=None,
+        ruleset=None,
+        source=None,
+        target=None,
+        options=None,
+        description=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Distribution Service
         PATCH /services/{version}/sources/{distpath}
@@ -6017,9 +8126,23 @@ class OGGRestAPI:
             other changes require the Administrator role.
 
         Parameters:
-            distpath (str):  Example: distpath_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            distpath (str): Required. Example: distpath_example
+            begin (dict): Starting point for data processing. Example: begin_example
+            name (str): distribution path name. Example: name_example
+            encryptionProfile (str): Name of 'ogg:encryptionProfile' value. Example:
+                encryptionProfile_example
+            status (dict): Oracle GoldenGate Distribution Path Status. Example: status_example
+            targetInitiated (bool): Whether the target endpoint initiates the path. If true, the path needs
+                to be created and modified through Receiver Server, who initiates the connection with
+                Distribution Server. Otherwise, this behavior is reversed. Example: targetInitiated_example
+            ruleset (dict):  Example: ruleset_example
+            source (dict): source endpoint of the path. Example: source_example
+            target (dict): target endpoint of the path. Example: target_example
+            options (dict): options for the distribution path. Example: options_example
+            description (str): Description for the path. Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6031,6 +8154,96 @@ class OGGRestAPI:
                     "status": "stopped"
                 }
             )
+
+            client.update_existing_distribution_path(
+                distpath='distpath_example',
+                begin=None,
+                name=None,
+                encryptionProfile=None,
+                status='stopped',
+                targetInitiated=None,
+                ruleset=None,
+                source={
+                    "description": None,
+                    "uri": None,
+                    "proxy": {
+                        "uri": None,
+                        "type": None,
+                        "csAlias": None,
+                        "csDomain": None
+                    },
+                    "details": {
+                        "trail": {
+                            "name": None,
+                            "path": None,
+                            "format": None,
+                            "sizeMB": None,
+                            "seqLength": None
+                        },
+                        "encryption": {
+                            "algorithm": None,
+                            "keyname": None
+                        },
+                        "compression": {
+                            "enabled": None,
+                            "threshold": None
+                        }
+                    },
+                    "isDynamicOggPort": None
+                },
+                target={
+                    "description": None,
+                    "uri": None,
+                    "proxy": {
+                        "uri": None,
+                        "type": None,
+                        "csAlias": None,
+                        "csDomain": None
+                    },
+                    "details": {
+                        "trail": {
+                            "name": None,
+                            "path": None,
+                            "format": None,
+                            "sizeMB": None,
+                            "seqLength": None
+                        },
+                        "encryption": {
+                            "algorithm": None,
+                            "keyname": None
+                        },
+                        "compression": {
+                            "enabled": None,
+                            "threshold": None
+                        }
+                    },
+                    "isDynamicOggPort": None
+                },
+                options={
+                    "tcpSourceTimer": None,
+                    "reportCount": {
+                        "measurementUnit": None,
+                        "count": None,
+                        "rate": None
+                    },
+                    "network": {
+                        "socketOptions": None,
+                        "appOptions": {
+                            "appFlushBytes": None,
+                            "appFlushSecs": None
+                        }
+                    },
+                    "streaming": None,
+                    "critical": None,
+                    "autoRestart": {
+                        "retries": None,
+                        "delay": None
+                    },
+                    "eofDelayCSecs": None,
+                    "checkpointFrequency": None
+                },
+                description=None
+            )
         """
         path_params = {
             "distpath": distpath,
@@ -6041,19 +8254,36 @@ class OGGRestAPI:
             "/services/{version}/sources/{distpath}",
             path_params=path_params,
             data=data,
+            body_params={
+                "begin": begin,
+                "name": name,
+                "encryptionProfile": encryptionProfile,
+                "status": status,
+                "targetInitiated": targetInitiated,
+                "ruleset": ruleset,
+                "source": source,
+                "target": target,
+                "options": options,
+                "description": description,
+            },
             ogg_service="distsrvr",
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def retrieve_existing_oracle_goldengate_distribution_path(self, distpath, version='v2', raw_response=False):
+    def retrieve_existing_oracle_goldengate_distribution_path(
+        self,
+        distpath,
+        version='v2',
+        raw_response=False
+    ):
         """
         Distribution Service
         GET /services/{version}/sources/{distpath}
 
         Parameters:
-            distpath (str):  Example: distpath_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            distpath (str): Required. Example: distpath_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6075,14 +8305,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}/checkpoints
-    def retrieve_existing_oracle_goldengate_distribution_path_checkpoints(self, distpath, version='v2', raw_response=False):
+    def retrieve_existing_oracle_goldengate_distribution_path_checkpoints(
+        self,
+        distpath,
+        version='v2',
+        raw_response=False
+    ):
         """
         Distribution Service
         GET /services/{version}/sources/{distpath}/checkpoints
 
         Parameters:
-            distpath (str):  Example: distpath_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            distpath (str): Required. Example: distpath_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6104,14 +8339,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}/info
-    def retrieve_existing_oracle_goldengate_distribution_path_information(self, distpath, version='v2', raw_response=False):
+    def retrieve_existing_oracle_goldengate_distribution_path_information(
+        self,
+        distpath,
+        version='v2',
+        raw_response=False
+    ):
         """
         Distribution Service
         GET /services/{version}/sources/{distpath}/info
 
         Parameters:
-            distpath (str):  Example: distpath_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            distpath (str): Required. Example: distpath_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6133,14 +8373,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}/stats
-    def retrieve_existing_oracle_goldengate_distribution_path_statistics(self, distpath, version='v2', raw_response=False):
+    def retrieve_existing_oracle_goldengate_distribution_path_statistics(
+        self,
+        distpath,
+        version='v2',
+        raw_response=False
+    ):
         """
         Distribution Service
         GET /services/{version}/sources/{distpath}/stats
 
         Parameters:
-            distpath (str):  Example: distpath_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            distpath (str): Required. Example: distpath_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6162,13 +8407,17 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets
-    def get_list_distribution_paths_targets(self, version='v2', raw_response=False):
+    def get_list_distribution_paths_targets(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Receiver Service
         GET /services/{version}/targets
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6188,14 +8437,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def delete_existing_oracle_goldengate_collector_path(self, path, version='v2', raw_response=False):
+    def delete_existing_oracle_goldengate_collector_path(
+        self,
+        path,
+        version='v2',
+        raw_response=False
+    ):
         """
         Receiver Service
         DELETE /services/{version}/targets/{path}
 
         Parameters:
-            path (str):  Example: path_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            path (str): Required. Example: path_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6217,15 +8471,46 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def create_new_oracle_goldengate_collector_path(self, path, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_new_oracle_goldengate_collector_path(
+        self,
+        path,
+        begin=None,
+        name=None,
+        encryptionProfile=None,
+        status=None,
+        targetInitiated=None,
+        ruleset=None,
+        source=None,
+        target=None,
+        options=None,
+        description=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Receiver Service
         POST /services/{version}/targets/{path}
 
         Parameters:
-            path (str):  Example: path_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            path (str): Required. Example: path_example
+            begin (dict): Starting point for data processing. Example: begin_example
+            name (str): distribution path name. Example: name_example
+            encryptionProfile (str): Name of 'ogg:encryptionProfile' value. Example:
+                encryptionProfile_example
+            status (dict): Oracle GoldenGate Distribution Path Status. Example: status_example
+            targetInitiated (bool): Whether the target endpoint initiates the path. If true, the path needs
+                to be created and modified through Receiver Server, who initiates the connection with
+                Distribution Server. Otherwise, this behavior is reversed. Example: targetInitiated_example
+            ruleset (dict):  Example: ruleset_example
+            source (dict): source endpoint of the path. Example: source_example
+            target (dict): target endpoint of the path. Example: target_example
+            options (dict): options for the distribution path. Example: options_example
+            description (str): Description for the path. Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -6251,6 +8536,49 @@ class OGGRestAPI:
                     "status": "running"
                 }
             )
+
+            client.create_new_oracle_goldengate_collector_path(
+                path='path_example',
+                begin={
+                    "sequence": 0,
+                    "offset": 0
+                },
+                name='path1',
+                encryptionProfile=None,
+                status='running',
+                targetInitiated=None,
+                ruleset=None,
+                source={
+                    "uri": "trail://localhost:7999/dirdat/a1"
+                },
+                target={
+                    "uri": "ogg://adc00oye:7999/dirdat/t1"
+                },
+                options={
+                    "tcpSourceTimer": None,
+                    "reportCount": {
+                        "measurementUnit": None,
+                        "count": None,
+                        "rate": None
+                    },
+                    "network": {
+                        "socketOptions": None,
+                        "appOptions": {
+                            "appFlushBytes": None,
+                            "appFlushSecs": None
+                        }
+                    },
+                    "streaming": None,
+                    "critical": None,
+                    "autoRestart": {
+                        "retries": None,
+                        "delay": None
+                    },
+                    "eofDelayCSecs": None,
+                    "checkpointFrequency": None
+                },
+                description='my test distPath'
+            )
         """
         path_params = {
             "path": path,
@@ -6261,21 +8589,63 @@ class OGGRestAPI:
             "/services/{version}/targets/{path}",
             path_params=path_params,
             data=data,
+            body_params={
+                "begin": begin,
+                "name": name,
+                "encryptionProfile": encryptionProfile,
+                "status": status,
+                "targetInitiated": targetInitiated,
+                "ruleset": ruleset,
+                "source": source,
+                "target": target,
+                "options": options,
+                "description": description,
+            },
             ogg_service="recvsrvr",
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def update_existing_oracle_goldengate_collector_path(self, path, data=None, version='v2', raw_response=False):
+    def update_existing_oracle_goldengate_collector_path(
+        self,
+        path,
+        begin=None,
+        name=None,
+        encryptionProfile=None,
+        status=None,
+        targetInitiated=None,
+        ruleset=None,
+        source=None,
+        target=None,
+        options=None,
+        description=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Receiver Service
         PATCH /services/{version}/targets/{path}
 
         Parameters:
-            path (str):  Example: path_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            path (str): Required. Example: path_example
+            begin (dict): Starting point for data processing. Example: begin_example
+            name (str): distribution path name. Example: name_example
+            encryptionProfile (str): Name of 'ogg:encryptionProfile' value. Example:
+                encryptionProfile_example
+            status (dict): Oracle GoldenGate Distribution Path Status. Example: status_example
+            targetInitiated (bool): Whether the target endpoint initiates the path. If true, the path needs
+                to be created and modified through Receiver Server, who initiates the connection with
+                Distribution Server. Otherwise, this behavior is reversed. Example: targetInitiated_example
+            ruleset (dict):  Example: ruleset_example
+            source (dict): source endpoint of the path. Example: source_example
+            target (dict): target endpoint of the path. Example: target_example
+            options (dict): options for the distribution path. Example: options_example
+            description (str): Description for the path. Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6293,6 +8663,81 @@ class OGGRestAPI:
                     }
                 }
             )
+
+            client.update_existing_oracle_goldengate_collector_path(
+                path='path_example',
+                begin=None,
+                name=None,
+                encryptionProfile=None,
+                status=None,
+                targetInitiated=None,
+                ruleset=None,
+                source={
+                    "description": None,
+                    "uri": None,
+                    "proxy": {
+                        "uri": None,
+                        "type": None,
+                        "csAlias": None,
+                        "csDomain": None
+                    },
+                    "details": {
+                        "trail": {
+                            "name": None,
+                            "path": None,
+                            "format": None,
+                            "sizeMB": None,
+                            "seqLength": None
+                        },
+                        "encryption": {
+                            "algorithm": None,
+                            "keyname": None
+                        },
+                        "compression": {
+                            "enabled": None,
+                            "threshold": None
+                        }
+                    },
+                    "isDynamicOggPort": None
+                },
+                target={
+                    "description": None,
+                    "uri": None,
+                    "proxy": {
+                        "uri": None,
+                        "type": None,
+                        "csAlias": None,
+                        "csDomain": None
+                    },
+                    "details": {
+                        "trail": {
+                            "name": None,
+                            "path": None,
+                            "format": None,
+                            "sizeMB": None,
+                            "seqLength": None
+                        },
+                        "encryption": {
+                            "algorithm": None,
+                            "keyname": None
+                        },
+                        "compression": {
+                            "enabled": None,
+                            "threshold": None
+                        }
+                    },
+                    "isDynamicOggPort": None
+                },
+                options={
+                    "network": {
+                        "appOptions": {
+                            "appFlushBytes": 24859,
+                            "appFlushSecs": 2
+                        }
+                    }
+                },
+                description=None
+            )
         """
         path_params = {
             "path": path,
@@ -6303,19 +8748,36 @@ class OGGRestAPI:
             "/services/{version}/targets/{path}",
             path_params=path_params,
             data=data,
+            body_params={
+                "begin": begin,
+                "name": name,
+                "encryptionProfile": encryptionProfile,
+                "status": status,
+                "targetInitiated": targetInitiated,
+                "ruleset": ruleset,
+                "source": source,
+                "target": target,
+                "options": options,
+                "description": description,
+            },
             ogg_service="recvsrvr",
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def retrieve_existing_oracle_goldengate_collector_path(self, path, version='v2', raw_response=False):
+    def retrieve_existing_oracle_goldengate_collector_path(
+        self,
+        path,
+        version='v2',
+        raw_response=False
+    ):
         """
         Receiver Service
         GET /services/{version}/targets/{path}
 
         Parameters:
-            path (str):  Example: path_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            path (str): Required. Example: path_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6337,14 +8799,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}/checkpoints
-    def retrieve_existing_oracle_goldengate_receiver_server_path_checkpoints(self, path, version='v2', raw_response=False):
+    def retrieve_existing_oracle_goldengate_receiver_server_path_checkpoints(
+        self,
+        path,
+        version='v2',
+        raw_response=False
+    ):
         """
         Receiver Service
         GET /services/{version}/targets/{path}/checkpoints
 
         Parameters:
-            path (str):  Example: path_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            path (str): Required. Example: path_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6366,14 +8833,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}/info
-    def retrieve_existing_oracle_goldengate_receiver_server_path_information(self, path, version='v2', raw_response=False):
+    def retrieve_existing_oracle_goldengate_receiver_server_path_information(
+        self,
+        path,
+        version='v2',
+        raw_response=False
+    ):
         """
         Receiver Service
         GET /services/{version}/targets/{path}/info
 
         Parameters:
-            path (str):  Example: path_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            path (str): Required. Example: path_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6395,14 +8867,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}/progress
-    def retrieve_existing_oracle_receiver_server_progress(self, path, version='v2', raw_response=False):
+    def retrieve_existing_oracle_receiver_server_progress(
+        self,
+        path,
+        version='v2',
+        raw_response=False
+    ):
         """
         Receiver Service
         GET /services/{version}/targets/{path}/progress
 
         Parameters:
-            path (str):  Example: path_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            path (str): Required. Example: path_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6424,14 +8901,19 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}/stats
-    def retrieve_existing_oracle_goldengate_receiver_server_path_stats(self, path, version='v2', raw_response=False):
+    def retrieve_existing_oracle_goldengate_receiver_server_path_stats(
+        self,
+        path,
+        version='v2',
+        raw_response=False
+    ):
         """
         Receiver Service
         GET /services/{version}/targets/{path}/stats
 
         Parameters:
-            path (str):  Example: path_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            path (str): Required. Example: path_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6453,14 +8935,18 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/tasks
-    def list_tasks(self, version='v2', raw_response=False):
+    def list_tasks(
+        self,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Tasks
         GET /services/{version}/tasks
         Retrieve the list of tasks
 
         Parameters:
-            version (str): Oracle GoldenGate Service API version. Example: v2
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6479,7 +8965,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/tasks/{task}
-    def retrieve_task(self, task, version='v2', raw_response=False):
+    def retrieve_task(
+        self,
+        task,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Tasks
         GET /services/{version}/tasks/{task}
@@ -6487,8 +8978,8 @@ class OGGRestAPI:
 
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
-                '_' or '-'. Example: task_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                '_' or '-'. Required. Example: task_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6509,7 +9000,23 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/tasks/{task}
-    def create_task(self, task, data=None, version='v2', raw_response=False, if_exists='fail'):
+    def create_task(
+        self,
+        task,
+        maxHistory=None,
+        command=None,
+        enabled=None,
+        schedule=None,
+        status=None,
+        timeout=None,
+        critical=None,
+        restart=None,
+        description=None,
+        data=None,
+        version='v2',
+        raw_response=False,
+        if_exists='fail'
+    ):
         """
         Administrative Server/Tasks
         POST /services/{version}/tasks/{task}
@@ -6517,9 +9024,20 @@ class OGGRestAPI:
 
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
-                '_' or '-'. Example: task_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                '_' or '-'. Required. Example: task_example
+            maxHistory (int): Number of task executions to maintain history for. Example: maxHistory_example
+            command (dict):  Example: command_example
+            enabled (bool): Indicates if the task is enabled for execution. Example: enabled_example
+            schedule (dict):  Example: schedule_example
+            status (str): Task Status. Example: status_example
+            timeout (int): Amount of time in seconds before a running task is cancelled. Example:
+                timeout_example
+            critical (bool): Indicates the task is critical to the deployment. Example: critical_example
+            restart (dict): Control how the task is restarted if it terminates. Example: restart_example
+            description (str): A description of the task. Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -6550,6 +9068,42 @@ class OGGRestAPI:
                     }
                 }
             )
+
+            client.create_task(
+                task='task_example',
+                maxHistory=None,
+                command={
+                    "name": "report",
+                    "reportType": "lag",
+                    "thresholds": [
+                        {
+                            "type": "critical",
+                            "units": "seconds",
+                            "value": 5
+                        }
+                    ]
+                },
+                enabled=False,
+                schedule={
+                    "every": {
+                        "units": "hours",
+                        "value": 1
+                    }
+                },
+                status=None,
+                timeout=None,
+                critical=None,
+                restart={
+                    "enabled": None,
+                    "onSuccess": None,
+                    "delay": None,
+                    "retries": None,
+                    "window": None,
+                    "disableOnFailure": None,
+                    "failures": None
+                },
+                description='Check critical lag every hour'
+            )
         """
         path_params = {
             "task": task,
@@ -6560,12 +9114,38 @@ class OGGRestAPI:
             "/services/{version}/tasks/{task}",
             path_params=path_params,
             data=data,
+            body_params={
+                "maxHistory": maxHistory,
+                "command": command,
+                "enabled": enabled,
+                "schedule": schedule,
+                "status": status,
+                "timeout": timeout,
+                "critical": critical,
+                "restart": restart,
+                "description": description,
+            },
             if_exists=if_exists,
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/tasks/{task}
-    def update_task(self, task, data=None, version='v2', raw_response=False):
+    def update_task(
+        self,
+        task,
+        maxHistory=None,
+        command=None,
+        enabled=None,
+        schedule=None,
+        status=None,
+        timeout=None,
+        critical=None,
+        restart=None,
+        description=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Tasks
         PATCH /services/{version}/tasks/{task}
@@ -6573,9 +9153,20 @@ class OGGRestAPI:
 
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
-                '_' or '-'. Example: task_example
-            data (dict): Data payload. See call example below for more details.
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                '_' or '-'. Required. Example: task_example
+            maxHistory (int): Number of task executions to maintain history for. Example: maxHistory_example
+            command (dict):  Example: command_example
+            enabled (bool): Indicates if the task is enabled for execution. Example: enabled_example
+            schedule (dict):  Example: schedule_example
+            status (str): Task Status. Example: status_example
+            timeout (int): Amount of time in seconds before a running task is cancelled. Example:
+                timeout_example
+            critical (bool): Indicates the task is critical to the deployment. Example: critical_example
+            restart (dict): Control how the task is restarted if it terminates. Example: restart_example
+            description (str): A description of the task. Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6585,6 +9176,27 @@ class OGGRestAPI:
                 data={
                     "enabled": True
                 }
+            )
+
+            client.update_task(
+                task='task_example',
+                maxHistory=None,
+                command=None,
+                enabled=True,
+                schedule=None,
+                status=None,
+                timeout=None,
+                critical=None,
+                restart={
+                    "enabled": None,
+                    "onSuccess": None,
+                    "delay": None,
+                    "retries": None,
+                    "window": None,
+                    "disableOnFailure": None,
+                    "failures": None
+                },
+                description=None
             )
         """
         path_params = {
@@ -6596,11 +9208,27 @@ class OGGRestAPI:
             "/services/{version}/tasks/{task}",
             path_params=path_params,
             data=data,
+            body_params={
+                "maxHistory": maxHistory,
+                "command": command,
+                "enabled": enabled,
+                "schedule": schedule,
+                "status": status,
+                "timeout": timeout,
+                "critical": critical,
+                "restart": restart,
+                "description": description,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/tasks/{task}
-    def delete_task(self, task, version='v2', raw_response=False):
+    def delete_task(
+        self,
+        task,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Tasks
         DELETE /services/{version}/tasks/{task}
@@ -6608,8 +9236,8 @@ class OGGRestAPI:
 
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
-                '_' or '-'. Example: task_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                '_' or '-'. Required. Example: task_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6630,7 +9258,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/tasks/{task}/info
-    def list_information_types_task(self, task, version='v2', raw_response=False):
+    def list_information_types_task(
+        self,
+        task,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Tasks
         GET /services/{version}/tasks/{task}/info
@@ -6638,8 +9271,8 @@ class OGGRestAPI:
 
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
-                '_' or '-'. Example: task_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                '_' or '-'. Required. Example: task_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6660,7 +9293,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/tasks/{task}/info/history
-    def retrieve_task_history(self, task, version='v2', raw_response=False):
+    def retrieve_task_history(
+        self,
+        task,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Tasks
         GET /services/{version}/tasks/{task}/info/history
@@ -6668,8 +9306,8 @@ class OGGRestAPI:
 
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
-                '_' or '-'. Example: task_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                '_' or '-'. Required. Example: task_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6690,7 +9328,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/tasks/{task}/info/status
-    def retrieve_task_status(self, task, version='v2', raw_response=False):
+    def retrieve_task_status(
+        self,
+        task,
+        version='v2',
+        raw_response=False
+    ):
         """
         Administrative Server/Tasks
         GET /services/{version}/tasks/{task}/info/status
@@ -6698,8 +9341,8 @@ class OGGRestAPI:
 
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
-                '_' or '-'. Example: task_example
-            version (str): Oracle GoldenGate Service API version. Example: v2
+                '_' or '-'. Required. Example: task_example
+            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
