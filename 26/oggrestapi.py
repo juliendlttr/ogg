@@ -27,9 +27,9 @@ class OGGRestAPI:
         :param test_connection: if True, will attempt to retrieve API versions on init
         :param timeout: request timeout in seconds
         """
+        self.swagger_version = '2026.01.27'
         self.base_url = url
         self.username = username
-        self.swagger_version = '2026.01.27'
         self.auth = (self.username, password)
         self.headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
         self.deployment = deployment
@@ -66,10 +66,10 @@ class OGGRestAPI:
             timeout=self.timeout
         )
 
-        result = self._parse(response)
         if raw_response:
             return result
         else:
+            result = self._parse(response)
             self._check_response(response, url)
             return self._extract_main(result)
 
@@ -85,11 +85,51 @@ class OGGRestAPI:
                 template = f'/services/{self.deployment}/{ogg_service}/{template.lstrip("/services")}'
         return template.format(**path_params)
 
-    def _call(self, method, template, *, ogg_service=None, path_params=None, params=None, data=None, raw_response=False):
+    def _call(self, method, template, *, ogg_service=None, path_params=None, params=None, data=None, raw_response=False, if_exists='fail'):
         if self.reverse_proxy and ogg_service == '' and self.deployment:
             # This is a common endpoint and a deployment is specified. Choosing adminsrvr service by default.
             ogg_service = "adminsrvr"
         path = self._build_path(template, ogg_service=ogg_service, path_params=path_params)
+        url = f'{self.base_url}{path}'
+
+        # If caller asked to skip on existing resource, perform a raw request and handle 409 specially
+        if if_exists == 'skip':
+            response = self.session.request(
+                method,
+                url,
+                auth=self.auth,
+                headers=self.headers,
+                params=params,
+                json=data,
+                verify=self.verify_ssl,
+                timeout=self.timeout
+            )
+
+            try:
+                parsed = response.json()
+            except ValueError:
+                parsed = response.text
+
+            if response.status_code == 409:
+                titles = []
+                try:
+                    msgs = parsed.get('messages', []) if isinstance(parsed, dict) else []
+                    for m in msgs:
+                        if isinstance(m, dict) and 'title' in m:
+                            titles.append(m['title'])
+                except Exception:
+                    pass
+                message = '; '.join(titles) if titles else 'Resource exists'
+                print(f"{message} (if_exists set to skip)")
+                return {'status': 'skipped', 'message': message, 'http_status': 409, 'raw': parsed}
+
+            # Otherwise behave like normal _call: raise on errors, return parsed or extracted
+            self._check_response(response, url)
+            if raw_response:
+                return parsed
+            return self._extract_main(parsed)
+
+        # Default behavior: use existing request flow
         result = self._request(method, path, params=params, data=data, raw_response=raw_response)
         return result
 
@@ -110,12 +150,16 @@ class OGGRestAPI:
 
     def _check_response(self, response, url):
         if not response.ok:
-            if 'messages' in response.json():
-                messages = response.json().get('messages', [])
-                raise Exception(
-                    ' ; '.join([f"{message['severity']} - {url}: {message['title']}" for message in messages])
-                )
-            else:
+            try:
+                if 'messages' in response.json():
+                    messages = response.json().get('messages', [])
+                    raise Exception(
+                        ' ; '.join([f"{message['severity']} - {url}: {message['title']}" for message in messages])
+                    )
+                else:
+                    print(f'HTTP {response.status_code}: {response.text}')
+                    response.raise_for_status()
+            except ValueError:
                 print(f'HTTP {response.status_code}: {response.text}')
                 response.raise_for_status()
 
@@ -432,7 +476,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/authorizations/{role}/{user}
-    def create_user(self, user, role, data=None, version='v2', ogg_service='', raw_response=False):
+    def create_user(self, user, role, data=None, version='v2', ogg_service='', raw_response=False, if_exists='fail'):
         """
         Common/User Management
         POST /services/{version}/authorizations/{role}/{user}
@@ -448,6 +492,8 @@ class OGGRestAPI:
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_user(
@@ -471,6 +517,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service=ogg_service,
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -840,7 +887,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/files/{file}
-    def create_configuration_file(self, file, data=None, version='v2', ogg_service='', raw_response=False):
+    def create_configuration_file(self, file, data=None, version='v2', ogg_service='', raw_response=False, if_exists='fail'):
         """
         Common/Configuration Settings
         POST /services/{version}/config/files/{file}
@@ -855,6 +902,8 @@ class OGGRestAPI:
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_configuration_file(
@@ -878,6 +927,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service=ogg_service,
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -1116,7 +1166,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def create_configuration_data_type(self, type, data=None, version='v2', ogg_service='', raw_response=False):
+    def create_configuration_data_type(self, type, data=None, version='v2', ogg_service='', raw_response=False, if_exists='fail'):
         """
         Common/Configuration Settings
         POST /services/{version}/config/types/{type}
@@ -1131,6 +1181,8 @@ class OGGRestAPI:
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_configuration_data_type(
@@ -1175,6 +1227,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service=ogg_service,
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -1285,7 +1338,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def create_configuration_value(self, value, type, data=None, version='v2', ogg_service='', raw_response=False):
+    def create_configuration_value(self, value, type, data=None, version='v2', ogg_service='', raw_response=False, if_exists='fail'):
         """
         Common/Configuration Settings
         POST /services/{version}/config/types/{type}/values/{value}
@@ -1302,6 +1355,8 @@ class OGGRestAPI:
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_configuration_value(
@@ -1329,6 +1384,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service=ogg_service,
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -1520,7 +1576,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}
-    def create_connection(self, connection, data=None, version='v2', raw_response=False):
+    def create_connection(self, connection, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Administration Service/Database
         POST /services/{version}/connections/{connection}
@@ -1535,6 +1591,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_connection(
@@ -1557,6 +1615,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="adminsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -1889,7 +1948,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/heartbeat
-    def create_heartbeat_table(self, connection, data=None, version='v2', raw_response=False):
+    def create_heartbeat_table(self, connection, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Administration Service/Database
         POST /services/{version}/connections/{connection}/tables/heartbeat
@@ -1903,6 +1962,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_heartbeat_table(
@@ -1922,6 +1983,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="adminsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -2336,7 +2398,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/credentials/{domain}/{alias}
-    def create_alias(self, alias, domain, data=None, version='v2', raw_response=False):
+    def create_alias(self, alias, domain, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Administration Service/Credentials
         POST /services/{version}/credentials/{domain}/{alias}
@@ -2350,6 +2412,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_alias(
@@ -2372,6 +2436,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="adminsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -2758,7 +2823,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}
-    def create_deployment(self, deployment, data=None, version='v2', raw_response=False):
+    def create_deployment(self, deployment, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Service Manager/Deployments
         POST /services/{version}/deployments/{deployment}
@@ -2771,6 +2836,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_deployment(
@@ -2793,6 +2860,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="ServiceManager",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -2929,7 +2997,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/authorization/profiles/{profile}
-    def create_authorization_profile(self, profile, deployment, data=None, version='v2', raw_response=False):
+    def create_authorization_profile(self, profile, deployment, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Service Manager/Authorization Profiles
         POST /services/{version}/deployments/{deployment}/authorization/profiles/{profile}
@@ -2943,6 +3011,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_authorization_profile(
@@ -2970,6 +3040,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="ServiceManager",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -3426,7 +3497,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/plugin/templates/{plugin}
-    def create_plugin_template(self, plugin, deployment, data=None, version='v2', raw_response=False):
+    def create_plugin_template(self, plugin, deployment, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Service Manager/Plugin Templates
         POST /services/{version}/deployments/{deployment}/plugin/templates/{plugin}
@@ -3440,6 +3511,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_plugin_template(
@@ -3475,6 +3548,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="ServiceManager",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -3627,7 +3701,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}
-    def create_service(self, service, deployment, data=None, version='v2', raw_response=False):
+    def create_service(self, service, deployment, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Service Manager/Services
         POST /services/{version}/deployments/{deployment}/services/{service}
@@ -3642,6 +3716,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_service(
@@ -3675,6 +3751,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="ServiceManager",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -3880,7 +3957,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/enckeys/{keyName}
-    def create_encryption_key(self, keyName, data=None, version='v2', raw_response=False):
+    def create_encryption_key(self, keyName, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Administration Service/Encryption Keys
         POST /services/{version}/enckeys/{keyName}
@@ -3893,6 +3970,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_encryption_key(
@@ -3912,6 +3991,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="adminsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -4042,7 +4122,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/encryption/profiles/{profile}
-    def create_encryption_profile(self, profile, data=None, version='v2', raw_response=False):
+    def create_encryption_profile(self, profile, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Administration Service/Encryption Profiles
         POST /services/{version}/encryption/profiles/{profile}
@@ -4055,6 +4135,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_encryption_profile(
@@ -4084,6 +4166,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="adminsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -4247,7 +4330,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}
-    def create_extract(self, extract, data=None, version='v2', raw_response=False):
+    def create_extract(self, extract, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Administration Service/Extracts
         POST /services/{version}/extracts/{extract}
@@ -4261,6 +4344,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_extract(
@@ -4305,6 +4390,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="adminsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -4864,7 +4950,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/models/{model}
-    def create_model(self, model, data=None, version='v2', raw_response=False):
+    def create_model(self, model, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Service Manager/AI Management
         POST /services/{version}/installation/aiservice/models/{model}
@@ -4877,6 +4963,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_model(
@@ -4905,6 +4993,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="ServiceManager",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -5044,7 +5133,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/providers/{provider}
-    def create_provider(self, provider, data=None, version='v2', raw_response=False):
+    def create_provider(self, provider, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Service Manager/AI Management
         POST /services/{version}/installation/aiservice/providers/{provider}
@@ -5057,6 +5146,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_provider(
@@ -5083,6 +5174,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="ServiceManager",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -5484,7 +5576,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/configuration/backends
-    def create_backend(self, data=None, version='v2', raw_response=False):
+    def create_backend(self, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Service Manager/Installation
         POST /services/{version}/installation/configuration/backends
@@ -5496,6 +5588,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_backend(
@@ -5516,6 +5610,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="ServiceManager",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -5981,7 +6076,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/masterkey
-    def create_version(self, version='v2', raw_response=False):
+    def create_version(self, version='v2', raw_response=False, if_exists='fail'):
         """
         Administration Service/Master Keys
         POST /services/{version}/masterkey
@@ -5992,6 +6087,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_version()
@@ -6005,6 +6102,7 @@ class OGGRestAPI:
             "/services/{version}/masterkey",
             path_params=path_params,
             ogg_service="adminsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -7922,7 +8020,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}
-    def create_replicat(self, replicat, data=None, version='v2', raw_response=False):
+    def create_replicat(self, replicat, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Administration Service/Replicats
         POST /services/{version}/replicats/{replicat}
@@ -7937,6 +8035,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_replicat(
@@ -7974,6 +8074,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="adminsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -8589,7 +8690,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def create_new_oracle_goldengate_distribution_path(self, distpath, data=None, version='v2', raw_response=False):
+    def create_new_oracle_goldengate_distribution_path(self, distpath, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Distribution Service
         POST /services/{version}/sources/{distpath}
@@ -8602,6 +8703,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_new_oracle_goldengate_distribution_path(
@@ -8637,6 +8740,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="distsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -8862,7 +8966,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/stream/{streamName}
-    def create_new_oracle_goldengate_data_stream_configuration(self, streamName, data=None, version='v2', raw_response=False):
+    def create_new_oracle_goldengate_data_stream_configuration(self, streamName, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Distribution Service
         POST /services/{version}/stream/{streamName}
@@ -8875,6 +8979,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_new_oracle_goldengate_data_stream_configuration(
@@ -8896,6 +9002,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="distsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -9153,7 +9260,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def create_new_oracle_goldengate_collector_path(self, path, data=None, version='v2', raw_response=False):
+    def create_new_oracle_goldengate_collector_path(self, path, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Receiver Service
         POST /services/{version}/targets/{path}
@@ -9166,6 +9273,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_new_oracle_goldengate_collector_path(
@@ -9201,6 +9310,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="recvsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -9463,7 +9573,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/tasks/{task}
-    def create_task(self, task, data=None, version='v2', raw_response=False):
+    def create_task(self, task, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Administration Service/Tasks
         POST /services/{version}/tasks/{task}
@@ -9477,6 +9587,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_task(
@@ -9514,6 +9626,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="adminsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -9752,7 +9865,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/trails/{trail}
-    def create_trail(self, trail, data=None, version='v2', raw_response=False):
+    def create_trail(self, trail, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Administration Service/Trails
         POST /services/{version}/trails/{trail}
@@ -9775,6 +9888,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_trail(
@@ -9798,6 +9913,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="adminsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -10016,7 +10132,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/trails/{trail}/sequences/{sequence}
-    def create_trail_sequence(self, sequence, trail, data=None, version='v2', raw_response=False):
+    def create_trail_sequence(self, sequence, trail, data=None, version='v2', raw_response=False, if_exists='fail'):
         """
         Administration Service/Trails
         POST /services/{version}/trails/{trail}/sequences/{sequence}
@@ -10040,6 +10156,8 @@ class OGGRestAPI:
             version (str): Oracle GoldenGate Service API version. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
 
         Example:
             client.create_trail_sequence(
@@ -10058,6 +10176,7 @@ class OGGRestAPI:
             path_params=path_params,
             data=data,
             ogg_service="adminsrvr",
+            if_exists=if_exists,
             raw_response=raw_response
         )
 
@@ -10102,5 +10221,93 @@ class OGGRestAPI:
             "/services/{version}/trails/{trail}/sequences/{sequence}",
             path_params=path_params,
             ogg_service="adminsrvr",
+            raw_response=raw_response
+        )
+
+    """
+    Custom API methods appended to the OGGRestAPI client.
+    These methods are not endpoints of the original swagger.json but are
+    commonly used operations that combine one or more API calls for convenience.
+    """
+
+    def start_deployment(self, deployment, version='v2', raw_response=False):
+        return self.update_deployment(
+            deployment,
+            data={'status': 'running'},
+            version=version,
+            raw_response=raw_response
+        )
+
+    def stop_deployment(self, deployment, version='v2', raw_response=False):
+        return self.update_deployment(
+            deployment,
+            data={'status': 'stopped'},
+            version=version,
+            raw_response=raw_response
+        )
+
+    def start_extract(self, extract, version='v2', raw_response=False):
+        return self.update_extract(
+            extract,
+            data={'status': 'running'},
+            version=version,
+            raw_response=raw_response
+        )
+
+    def stop_extract(self, extract, version='v2', raw_response=False):
+        return self.update_extract(
+            extract,
+            data={'status': 'stopped'},
+            version=version,
+            raw_response=raw_response
+        )
+
+    def start_replicat(self, replicat, version='v2', raw_response=False):
+        return self.update_replicat(
+            replicat,
+            data={'status': 'running'},
+            version=version,
+            raw_response=raw_response
+        )
+
+    def stop_replicat(self, replicat, version='v2', raw_response=False):
+        return self.update_replicat(
+            replicat,
+            data={'status': 'stopped'},
+            version=version,
+            raw_response=raw_response
+        )
+
+    def start_distribution_path(self, distpath, version='v2', raw_response=False):
+        return self.update_existing_distribution_path(
+            distpath,
+            data={'status': 'running'},
+            version=version,
+            raw_response=raw_response
+        )
+
+    def stop_distribution_path(self, distpath, version='v2', raw_response=False):
+        return self.update_existing_distribution_path(
+            distpath,
+            data={'status': 'stopped'},
+            version=version,
+            raw_response=raw_response
+        )
+
+    def start_service(self, service, deployment, version='v2', raw_response=False):
+        return self.update_service_properties(
+            service,
+            deployment,
+            data={'status': 'running'},
+            version=version,
+            raw_response=raw_response
+        )
+
+    def stop_service(self, service, deployment, version='v2', raw_response=False):
+        return self.update_service_properties(
+            service,
+            deployment,
+            data={'status': 'stopped'},
+            version=version,
             raw_response=raw_response
         )
