@@ -47,7 +47,7 @@ class OGGRestAPI:
         # Test connection
         if test_connection:
             try:
-                self.retrieve_api_versions()
+                self.list_api_versions()
                 print(f'Connected to OGG REST API at {self.base_url}')
             except Exception as e:
                 print(f'Error connecting to OGG REST API: {e}')
@@ -201,7 +201,7 @@ class OGGRestAPI:
         pprint(result)
 
     # Endpoint: /services
-    def retrieve_api_versions(
+    def list_api_versions(
         self,
         ogg_service='',
         raw_response=False
@@ -220,14 +220,14 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_api_versions(
+            client.list_api_versions(
                 ogg_service='adminsrvr'
             )
         """
         return self._call("GET", "/services", raw_response=raw_response)
 
     # Endpoint: /services/{version}
-    def describe_api_version(
+    def get_api_version(
         self,
         version='v2',
         ogg_service='',
@@ -247,7 +247,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.describe_api_version(
+            client.get_api_version(
                 ogg_service='adminsrvr'
             )
         """
@@ -263,7 +263,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/authorization
-    def receives_authorization_code_and_exchanges_it_for_access_and_id_token(
+    def exchange_auth_code_for_token(
         self,
         version='v2',
         raw_response=False
@@ -280,7 +280,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.receives_authorization_code_and_exchanges_it_for_access_and_id_token()
+            client.exchange_auth_code_for_token()
 
         """
         path_params = {
@@ -294,7 +294,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/authorizations
-    def list_user_roles(
+    def list_roles(
         self,
         version='v2',
         ogg_service='',
@@ -314,7 +314,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_user_roles(
+            client.list_roles(
                 ogg_service='adminsrvr'
             )
         """
@@ -370,7 +370,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/authorizations/{role}
-    def bulk_create_users_for_role(
+    def bulk_create_users(
         self,
         role,
         users=None,
@@ -397,7 +397,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.bulk_create_users_for_role(
+            client.bulk_create_users(
                 role='User',
                 ogg_service='adminsrvr',
                 data={
@@ -416,7 +416,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.bulk_create_users_for_role(
+            client.bulk_create_users(
                 role='User',
                 ogg_service='adminsrvr',
                 users=[
@@ -450,10 +450,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/authorizations/{role}/{user}
-    def retrieve_user(
+    def get_user(
         self,
-        user,
         role,
+        user,
         version='v2',
         ogg_service='',
         raw_response=False
@@ -465,8 +465,8 @@ class OGGRestAPI:
         Get Authorization User Resource information.
 
         Parameters:
-            user (str): User Resource Name. Required. Example: user_example
             role (str): Authorization Role Resource Name. Required. Example: User
+            user (str): User Resource Name. Required. Example: user_example
             version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
@@ -474,15 +474,15 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_user(
-                user='user_example',
+            client.get_user(
                 role='User',
+                user='user_example',
                 ogg_service='adminsrvr'
             )
         """
         path_params = {
-            "user": user,
             "role": role,
+            "user": user,
             "version": version,
         }
         return self._call(
@@ -496,8 +496,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/authorizations/{role}/{user}
     def create_user(
         self,
-        user,
         role,
+        user,
         data=None,
         version='v2',
         ogg_service='',
@@ -511,8 +511,8 @@ class OGGRestAPI:
         Create a new Authorization User Resource.
 
         Parameters:
-            user (str): User Resource Name. Required. Example: user_example
             role (str): Authorization Role Resource Name. Required. Example: User
+            user (str): User Resource Name. Required. Example: user_example
             data (dict): Data payload. See call example below for more details.
             version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
@@ -524,8 +524,8 @@ class OGGRestAPI:
 
         Example:
             client.create_user(
-                user='user_example',
                 role='User',
+                user='user_example',
                 ogg_service='adminsrvr',
                 data={
                     "credential": "password-A1",
@@ -534,8 +534,8 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "user": user,
             "role": role,
+            "user": user,
             "version": version,
         }
         return self._call(
@@ -551,8 +551,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/authorizations/{role}/{user}
     def update_user(
         self,
-        user,
         role,
+        user,
         data=None,
         version='v2',
         ogg_service='',
@@ -565,8 +565,8 @@ class OGGRestAPI:
         Update an existing Authorization User Resource.
 
         Parameters:
-            user (str): User Resource Name. Required. Example: user_example
             role (str): Authorization Role Resource Name. Required. Example: User
+            user (str): User Resource Name. Required. Example: user_example
             data (dict): Data payload. See call example below for more details.
             version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
@@ -576,8 +576,8 @@ class OGGRestAPI:
 
         Example:
             client.update_user(
-                user='user_example',
                 role='User',
+                user='user_example',
                 ogg_service='adminsrvr',
                 data={
                     "credential": "NewPassword-A1"
@@ -585,8 +585,8 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "user": user,
             "role": role,
+            "user": user,
             "version": version,
         }
         return self._call(
@@ -601,8 +601,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/authorizations/{role}/{user}
     def delete_user(
         self,
-        user,
         role,
+        user,
         version='v2',
         ogg_service='',
         raw_response=False
@@ -615,8 +615,8 @@ class OGGRestAPI:
             of "all" for {role}.
 
         Parameters:
-            user (str): User Resource Name. Required. Example: user_example
             role (str): Authorization Role Resource Name. Required. Example: User
+            user (str): User Resource Name. Required. Example: user_example
             version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
@@ -625,14 +625,14 @@ class OGGRestAPI:
 
         Example:
             client.delete_user(
-                user='user_example',
                 role='User',
+                user='user_example',
                 ogg_service='adminsrvr'
             )
         """
         path_params = {
-            "user": user,
             "role": role,
+            "user": user,
             "version": version,
         }
         return self._call(
@@ -644,10 +644,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/authorizations/{role}/{user}/info
-    def retrieve_additional_user_information(
+    def get_user_info(
         self,
-        user,
         role,
+        user,
         version='v2',
         ogg_service='',
         raw_response=False
@@ -659,8 +659,8 @@ class OGGRestAPI:
         Retrieve any additional information for the deployment user.
 
         Parameters:
-            user (str): User Resource Name. Required. Example: user_example
             role (str): Authorization Role Resource Name. Required. Example: User
+            user (str): User Resource Name. Required. Example: user_example
             version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
@@ -668,15 +668,15 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_additional_user_information(
-                user='user_example',
+            client.get_user_info(
                 role='User',
+                user='user_example',
                 ogg_service='adminsrvr'
             )
         """
         path_params = {
-            "user": user,
             "role": role,
+            "user": user,
             "version": version,
         }
         return self._call(
@@ -688,7 +688,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/certificates
-    def retrieve_available_certificate_types(
+    def list_certificate_types(
         self,
         version='v2',
         ogg_service='',
@@ -708,7 +708,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_available_certificate_types(
+            client.list_certificate_types(
                 ogg_service='adminsrvr'
             )
         """
@@ -724,7 +724,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/certificates/{type}
-    def retrieve_certificate_names(
+    def list_certificates(
         self,
         type,
         version='v2',
@@ -746,7 +746,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_certificate_names(
+            client.list_certificates(
                 type='type_example',
                 ogg_service='adminsrvr'
             )
@@ -764,10 +764,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/certificates/{type}/{certificate}
-    def retrieve_certificate(
+    def get_certificate(
         self,
-        certificate,
         type,
+        certificate,
         version='v2',
         ogg_service='',
         raw_response=False
@@ -779,8 +779,8 @@ class OGGRestAPI:
         Retrieve the certificate information for the named certificate.
 
         Parameters:
-            certificate (str): Certificate name. Required. Example: certificate_example
             type (str): Required. Example: type_example
+            certificate (str): Certificate name. Required. Example: certificate_example
             version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
@@ -788,15 +788,15 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_certificate(
-                certificate='certificate_example',
+            client.get_certificate(
                 type='type_example',
+                certificate='certificate_example',
                 ogg_service='adminsrvr'
             )
         """
         path_params = {
-            "certificate": certificate,
             "type": type,
+            "certificate": certificate,
             "version": version,
         }
         return self._call(
@@ -808,10 +808,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/certificates/{type}/{certificate}/info
-    def retrieve_certificate_information(
+    def get_certificate_info(
         self,
-        certificate,
         type,
+        certificate,
         version='v2',
         raw_response=False
     ):
@@ -822,21 +822,21 @@ class OGGRestAPI:
         Retrieve the certificate information for the named certificate in the deployment.
 
         Parameters:
-            certificate (str): Certificate name. Required. Example: certificate_example
             type (str): Required. Example: type_example
+            certificate (str): Certificate name. Required. Example: certificate_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_certificate_information(
-                certificate='certificate_example',
-                type='type_example'
+            client.get_certificate_info(
+                type='type_example',
+                certificate='certificate_example'
             )
         """
         path_params = {
-            "certificate": certificate,
             "type": type,
+            "certificate": certificate,
             "version": version,
         }
         return self._call(
@@ -936,7 +936,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/files/{file}
-    def retrieve_configuration_file(
+    def get_configuration_file(
         self,
         file,
         version='v2',
@@ -958,7 +958,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_configuration_file(
+            client.get_configuration_file(
                 file='file_example',
                 ogg_service='adminsrvr'
             )
@@ -1044,70 +1044,6 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/files/{file}
-    def replace_configuration_file(
-        self,
-        file,
-        lines=None,
-        data=None,
-        version='v2',
-        ogg_service='',
-        raw_response=False
-    ):
-        """
-        Common/Configuration Settings
-        PUT /services/{version}/config/files/{file}
-        Required Role: Administrator
-        Modify an existing configuration file.
-
-        Parameters:
-            file (str): The name of a configuration file. Required. Example: file_example
-            lines (list): Required if not included in `data`. Example: lines_example
-            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
-                dict when provided.
-            version (str): Defaults to v2. Example: v2
-            ogg_service (str): The service name to use for the request. It is only needed when using a
-                reverse proxy. Example: ogg_service_example
-            raw_response (bool): If True, return raw parsed response from _parse() instead of
-                _extract_main().
-
-        Example:
-            client.replace_configuration_file(
-                file='file_example',
-                ogg_service='adminsrvr',
-                data={
-                    "lines": [
-                        "UseridAlias oggadmin",
-                        "ReportCount Every 100000 Records"
-                    ]
-                }
-            )
-
-            client.replace_configuration_file(
-                file='file_example',
-                ogg_service='adminsrvr',
-                lines=[
-                    "UseridAlias oggadmin",
-                    "ReportCount Every 100000 Records"
-                ]
-            )
-        """
-        path_params = {
-            "file": file,
-            "version": version,
-        }
-        return self._call(
-            "PUT",
-            "/services/{version}/config/files/{file}",
-            path_params=path_params,
-            data=data,
-            body_params={
-                "lines": lines,
-            },
-            ogg_service=ogg_service,
-            raw_response=raw_response
-        )
-
-    # Endpoint: /services/{version}/config/files/{file}
     def delete_configuration_file(
         self,
         file,
@@ -1147,8 +1083,72 @@ class OGGRestAPI:
             raw_response=raw_response
         )
 
+    # Endpoint: /services/{version}/config/files/{file}
+    def update_configuration_file(
+        self,
+        file,
+        lines=None,
+        data=None,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
+        """
+        Common/Configuration Settings
+        PUT /services/{version}/config/files/{file}
+        Required Role: Administrator
+        Modify an existing configuration file.
+
+        Parameters:
+            file (str): The name of a configuration file. Required. Example: file_example
+            lines (list): Required if not included in `data`. Example: lines_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
+            ogg_service (str): The service name to use for the request. It is only needed when using a
+                reverse proxy. Example: ogg_service_example
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.update_configuration_file(
+                file='file_example',
+                ogg_service='adminsrvr',
+                data={
+                    "lines": [
+                        "UseridAlias oggadmin",
+                        "ReportCount Every 100000 Records"
+                    ]
+                }
+            )
+
+            client.update_configuration_file(
+                file='file_example',
+                ogg_service='adminsrvr',
+                lines=[
+                    "UseridAlias oggadmin",
+                    "ReportCount Every 100000 Records"
+                ]
+            )
+        """
+        path_params = {
+            "file": file,
+            "version": version,
+        }
+        return self._call(
+            "PUT",
+            "/services/{version}/config/files/{file}",
+            path_params=path_params,
+            data=data,
+            body_params={
+                "lines": lines,
+            },
+            ogg_service=ogg_service,
+            raw_response=raw_response
+        )
+
     # Endpoint: /services/{version}/config/health
-    def service_health_details(
+    def get_service_health(
         self,
         version='v2',
         ogg_service='',
@@ -1168,7 +1168,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.service_health_details(
+            client.get_service_health(
                 ogg_service='adminsrvr'
             )
         """
@@ -1184,7 +1184,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/health/check
-    def service_health_summary(
+    def get_service_health_check(
         self,
         version='v2',
         ogg_service='',
@@ -1204,7 +1204,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.service_health_summary(
+            client.get_service_health_check(
                 ogg_service='adminsrvr'
             )
         """
@@ -1220,7 +1220,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/summary
-    def service_configuration_summary(
+    def get_config_summary(
         self,
         version='v2',
         ogg_service='',
@@ -1240,7 +1240,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.service_configuration_summary(
+            client.get_config_summary(
                 ogg_service='adminsrvr'
             )
         """
@@ -1256,7 +1256,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types
-    def list_configuration_data_types(
+    def list_config_types(
         self,
         version='v2',
         ogg_service='',
@@ -1276,7 +1276,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_configuration_data_types(
+            client.list_config_types(
                 ogg_service='adminsrvr'
             )
         """
@@ -1292,7 +1292,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def retrieve_configuration_data_type(
+    def get_config_type(
         self,
         type,
         version='v2',
@@ -1314,7 +1314,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_configuration_data_type(
+            client.get_config_type(
                 type='type_example',
                 ogg_service='adminsrvr'
             )
@@ -1332,7 +1332,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def create_configuration_data_type(
+    def create_config_type(
         self,
         type,
         data=None,
@@ -1359,7 +1359,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.create_configuration_data_type(
+            client.create_config_type(
                 type='type_example',
                 ogg_service='adminsrvr',
                 data={
@@ -1406,7 +1406,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}
-    def delete_configuration_data_type(
+    def delete_config_type(
         self,
         type,
         version='v2',
@@ -1428,7 +1428,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.delete_configuration_data_type(
+            client.delete_config_type(
                 type='type_example',
                 ogg_service='adminsrvr'
             )
@@ -1446,7 +1446,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values
-    def list_configuration_values(
+    def list_config_values(
         self,
         type,
         version='v2',
@@ -1468,7 +1468,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_configuration_values(
+            client.list_config_values(
                 type='type_example',
                 ogg_service='adminsrvr'
             )
@@ -1486,10 +1486,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def retrieve_configuration_value(
+    def get_config_value(
         self,
-        value,
         type,
+        value,
         version='v2',
         ogg_service='',
         raw_response=False
@@ -1501,9 +1501,9 @@ class OGGRestAPI:
         Retrieve a configuration value.
 
         Parameters:
+            type (str): Required. Example: type_example
             value (str): Value name, an alpha-numeric character followed by up to 95 alpha-numeric
                 characters, '_', ':' or '-'. Required. Example: value_example
-            type (str): Required. Example: type_example
             version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
@@ -1511,15 +1511,15 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_configuration_value(
-                value='value_example',
+            client.get_config_value(
                 type='type_example',
+                value='value_example',
                 ogg_service='adminsrvr'
             )
         """
         path_params = {
-            "value": value,
             "type": type,
+            "value": value,
             "version": version,
         }
         return self._call(
@@ -1531,10 +1531,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def create_configuration_value(
+    def create_config_value(
         self,
-        value,
         type,
+        value,
         data=None,
         version='v2',
         ogg_service='',
@@ -1548,9 +1548,9 @@ class OGGRestAPI:
         Create a new configuration value.
 
         Parameters:
+            type (str): Required. Example: type_example
             value (str): Value name, an alpha-numeric character followed by up to 95 alpha-numeric
                 characters, '_', ':' or '-'. Required. Example: value_example
-            type (str): Required. Example: type_example
             data (dict): Data payload. See call example below for more details.
             version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
@@ -1561,9 +1561,9 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.create_configuration_value(
-                value='value_example',
+            client.create_config_value(
                 type='type_example',
+                value='value_example',
                 ogg_service='adminsrvr',
                 data={
                     "$schema": "custom:config",
@@ -1576,8 +1576,8 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "value": value,
             "type": type,
+            "value": value,
             "version": version,
         }
         return self._call(
@@ -1591,10 +1591,55 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def replace_configuration_value(
+    def delete_config_value(
         self,
-        value,
         type,
+        value,
+        version='v2',
+        ogg_service='',
+        raw_response=False
+    ):
+        """
+        Common/Configuration Settings
+        DELETE /services/{version}/config/types/{type}/values/{value}
+        Required Role: Administrator
+        Delete a configuration value.
+
+        Parameters:
+            type (str): Required. Example: type_example
+            value (str): Value name, an alpha-numeric character followed by up to 95 alpha-numeric
+                characters, '_', ':' or '-'. Required. Example: value_example
+            version (str): Defaults to v2. Example: v2
+            ogg_service (str): The service name to use for the request. It is only needed when using a
+                reverse proxy. Example: ogg_service_example
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.delete_config_value(
+                type='type_example',
+                value='value_example',
+                ogg_service='adminsrvr'
+            )
+        """
+        path_params = {
+            "type": type,
+            "value": value,
+            "version": version,
+        }
+        return self._call(
+            "DELETE",
+            "/services/{version}/config/types/{type}/values/{value}",
+            path_params=path_params,
+            ogg_service=ogg_service,
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/config/types/{type}/values/{value}
+    def update_config_value(
+        self,
+        type,
+        value,
         data=None,
         version='v2',
         ogg_service='',
@@ -1607,9 +1652,9 @@ class OGGRestAPI:
         Replace an existing configuration value.
 
         Parameters:
+            type (str): Required. Example: type_example
             value (str): Value name, an alpha-numeric character followed by up to 95 alpha-numeric
                 characters, '_', ':' or '-'. Required. Example: value_example
-            type (str): Required. Example: type_example
             data (dict): Data payload. See call example below for more details.
             version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
@@ -1618,9 +1663,9 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.replace_configuration_value(
-                value='value_example',
+            client.update_config_value(
                 type='type_example',
+                value='value_example',
                 ogg_service='adminsrvr',
                 data={
                     "$schema": "custom:config",
@@ -1634,8 +1679,8 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "value": value,
             "type": type,
+            "value": value,
             "version": version,
         }
         return self._call(
@@ -1643,51 +1688,6 @@ class OGGRestAPI:
             "/services/{version}/config/types/{type}/values/{value}",
             path_params=path_params,
             data=data,
-            ogg_service=ogg_service,
-            raw_response=raw_response
-        )
-
-    # Endpoint: /services/{version}/config/types/{type}/values/{value}
-    def delete_configuration_value(
-        self,
-        value,
-        type,
-        version='v2',
-        ogg_service='',
-        raw_response=False
-    ):
-        """
-        Common/Configuration Settings
-        DELETE /services/{version}/config/types/{type}/values/{value}
-        Required Role: Administrator
-        Delete a configuration value.
-
-        Parameters:
-            value (str): Value name, an alpha-numeric character followed by up to 95 alpha-numeric
-                characters, '_', ':' or '-'. Required. Example: value_example
-            type (str): Required. Example: type_example
-            version (str): Defaults to v2. Example: v2
-            ogg_service (str): The service name to use for the request. It is only needed when using a
-                reverse proxy. Example: ogg_service_example
-            raw_response (bool): If True, return raw parsed response from _parse() instead of
-                _extract_main().
-
-        Example:
-            client.delete_configuration_value(
-                value='value_example',
-                type='type_example',
-                ogg_service='adminsrvr'
-            )
-        """
-        path_params = {
-            "value": value,
-            "type": type,
-            "version": version,
-        }
-        return self._call(
-            "DELETE",
-            "/services/{version}/config/types/{type}/values/{value}",
-            path_params=path_params,
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -1726,7 +1726,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}
-    def delete_connection(
+    def get_connection(
         self,
         connection,
         version='v2',
@@ -1734,9 +1734,9 @@ class OGGRestAPI:
     ):
         """
         Administration Service/Database
-        DELETE /services/{version}/connections/{connection}
-        Required Role: Administrator
-        Remove a database connection.
+        GET /services/{version}/connections/{connection}
+        Required Role: User
+        Retrieve the database connection details.
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
@@ -1746,7 +1746,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.delete_connection(
+            client.get_connection(
                 connection='MYCONN'
             )
         """
@@ -1755,68 +1755,9 @@ class OGGRestAPI:
             "version": version,
         }
         return self._call(
-            "DELETE",
+            "GET",
             "/services/{version}/connections/{connection}",
             path_params=path_params,
-            ogg_service="adminsrvr",
-            raw_response=raw_response
-        )
-
-    # Endpoint: /services/{version}/connections/{connection}
-    def replace_connection(
-        self,
-        connection,
-        credentials=None,
-        data=None,
-        version='v2',
-        raw_response=False
-    ):
-        """
-        Administration Service/Database
-        PUT /services/{version}/connections/{connection}
-        Required Role: Administrator
-        Update a database connection. Connections created for aliases in the credential store cannot be updated.
-
-        Parameters:
-            connection (str): Connection name. For each alias in the credential store, a connection with the
-                name 'domain.alias' exists. Required. Example: MYCONN
-            credentials (dict): Credentials for database. Required if not included in `data`. Example:
-                credentials_example
-            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
-                dict when provided.
-            version (str): Defaults to v2. Example: v2
-            raw_response (bool): If True, return raw parsed response from _parse() instead of
-                _extract_main().
-
-        Example:
-            client.replace_connection(
-                connection='MYCONN',
-                data={
-                    "credentials": {
-                        "alias": "ggnorth"
-                    }
-                }
-            )
-
-            client.replace_connection(
-                connection='MYCONN',
-                credentials={
-                    "alias": "ggnorth"
-                }
-            )
-        """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
-        return self._call(
-            "PUT",
-            "/services/{version}/connections/{connection}",
-            path_params=path_params,
-            data=data,
-            body_params={
-                "credentials": credentials,
-            },
             ogg_service="adminsrvr",
             raw_response=raw_response
         )
@@ -1888,7 +1829,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}
-    def retrieve_connection(
+    def delete_connection(
         self,
         connection,
         version='v2',
@@ -1896,9 +1837,9 @@ class OGGRestAPI:
     ):
         """
         Administration Service/Database
-        GET /services/{version}/connections/{connection}
-        Required Role: User
-        Retrieve the database connection details.
+        DELETE /services/{version}/connections/{connection}
+        Required Role: Administrator
+        Remove a database connection.
 
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
@@ -1908,7 +1849,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_connection(
+            client.delete_connection(
                 connection='MYCONN'
             )
         """
@@ -1917,15 +1858,74 @@ class OGGRestAPI:
             "version": version,
         }
         return self._call(
-            "GET",
+            "DELETE",
             "/services/{version}/connections/{connection}",
             path_params=path_params,
             ogg_service="adminsrvr",
             raw_response=raw_response
         )
 
+    # Endpoint: /services/{version}/connections/{connection}
+    def update_connection(
+        self,
+        connection,
+        credentials=None,
+        data=None,
+        version='v2',
+        raw_response=False
+    ):
+        """
+        Administration Service/Database
+        PUT /services/{version}/connections/{connection}
+        Required Role: Administrator
+        Update a database connection. Connections created for aliases in the credential store cannot be updated.
+
+        Parameters:
+            connection (str): Connection name. For each alias in the credential store, a connection with the
+                name 'domain.alias' exists. Required. Example: MYCONN
+            credentials (dict): Credentials for database. Required if not included in `data`. Example:
+                credentials_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            version (str): Defaults to v2. Example: v2
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.update_connection(
+                connection='MYCONN',
+                data={
+                    "credentials": {
+                        "alias": "ggnorth"
+                    }
+                }
+            )
+
+            client.update_connection(
+                connection='MYCONN',
+                credentials={
+                    "alias": "ggnorth"
+                }
+            )
+        """
+        path_params = {
+            "connection": connection,
+            "version": version,
+        }
+        return self._call(
+            "PUT",
+            "/services/{version}/connections/{connection}",
+            path_params=path_params,
+            data=data,
+            body_params={
+                "credentials": credentials,
+            },
+            ogg_service="adminsrvr",
+            raw_response=raw_response
+        )
+
     # Endpoint: /services/{version}/connections/{connection}/activeTransactions
-    def retrieve_active_transaction_details(
+    def get_active_transactions(
         self,
         connection,
         version='v2',
@@ -1945,7 +1945,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_active_transaction_details(
+            client.get_active_transactions(
                 connection='MYCONN'
             )
         """
@@ -1962,7 +1962,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/databases
-    def retrieve_database_names(
+    def list_database_names(
         self,
         connection,
         version='v2',
@@ -1982,7 +1982,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_database_names(
+            client.list_database_names(
                 connection='MYCONN'
             )
         """
@@ -1999,10 +1999,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/databases/{database}
-    def retrieve_database_schemas(
+    def list_database_schemas(
         self,
-        database,
         connection,
+        database,
         version='v2',
         raw_response=False
     ):
@@ -2013,22 +2013,22 @@ class OGGRestAPI:
         Retrieve names of schemas in the database.
 
         Parameters:
-            database (str): Database name. Required. Example: database_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
+            database (str): Database name. Required. Example: database_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_database_schemas(
-                database='database_example',
-                connection='MYCONN'
+            client.list_database_schemas(
+                connection='MYCONN',
+                database='database_example'
             )
         """
         path_params = {
-            "database": database,
             "connection": connection,
+            "database": database,
             "version": version,
         }
         return self._call(
@@ -2040,11 +2040,11 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/databases/{database}/{schema}
-    def retrieve_database_tables(
+    def list_database_tables(
         self,
-        schema,
-        database,
         connection,
+        database,
+        schema,
         version='v2',
         raw_response=False
     ):
@@ -2055,25 +2055,25 @@ class OGGRestAPI:
         Retrieve names of tables in the schema.
 
         Parameters:
-            schema (str): Schema name in the database. Required. Example: schema_example
-            database (str): Database name. Required. Example: database_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
+            database (str): Database name. Required. Example: database_example
+            schema (str): Schema name in the database. Required. Example: schema_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_database_tables(
-                schema='schema_example',
+            client.list_database_tables(
+                connection='MYCONN',
                 database='database_example',
-                connection='MYCONN'
+                schema='schema_example'
             )
         """
         path_params = {
-            "schema": schema,
-            "database": database,
             "connection": connection,
+            "database": database,
+            "schema": schema,
             "version": version,
         }
         return self._call(
@@ -2085,12 +2085,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/databases/{database}/{schema}/{table}
-    def retrieve_database_table_details(
+    def get_database_table(
         self,
-        table,
-        schema,
-        database,
         connection,
+        database,
+        schema,
+        table,
         version='v2',
         raw_response=False
     ):
@@ -2101,28 +2101,28 @@ class OGGRestAPI:
         Retrieve details for a table in the schema.
 
         Parameters:
-            table (str): Table name in the database. Required. Example: table_example
-            schema (str): Schema name in the database. Required. Example: schema_example
-            database (str): Database name. Required. Example: database_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
+            database (str): Database name. Required. Example: database_example
+            schema (str): Schema name in the database. Required. Example: schema_example
+            table (str): Table name in the database. Required. Example: table_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_database_table_details(
-                table='table_example',
-                schema='schema_example',
+            client.get_database_table(
+                connection='MYCONN',
                 database='database_example',
-                connection='MYCONN'
+                schema='schema_example',
+                table='table_example'
             )
         """
         path_params = {
-            "table": table,
-            "schema": schema,
-            "database": database,
             "connection": connection,
+            "database": database,
+            "schema": schema,
+            "table": table,
             "version": version,
         }
         return self._call(
@@ -2134,12 +2134,12 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/databases/{database}/{schema}/{table}/instantiationCsn
-    def manage_instantiation_csn(
+    def update_instantiation_csn(
         self,
-        table,
-        schema,
-        database,
         connection,
+        database,
+        schema,
+        table,
         data=None,
         version='v2',
         raw_response=False
@@ -2151,22 +2151,22 @@ class OGGRestAPI:
         Manage the instantiation CSN for filtering.
 
         Parameters:
-            table (str): Table name in the database. Required. Example: table_example
-            schema (str): Schema name in the database. Required. Example: schema_example
-            database (str): Database name. Required. Example: database_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
+            database (str): Database name. Required. Example: database_example
+            schema (str): Schema name in the database. Required. Example: schema_example
+            table (str): Table name in the database. Required. Example: table_example
             data (dict): Data payload. See call example below for more details.
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.manage_instantiation_csn(
-                table='table_example',
-                schema='schema_example',
-                database='database_example',
+            client.update_instantiation_csn(
                 connection='MYCONN',
+                database='database_example',
+                schema='schema_example',
+                table='table_example',
                 data={
                     "command": "set",
                     "csn": "32036323",
@@ -2175,10 +2175,10 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "table": table,
-            "schema": schema,
-            "database": database,
             "connection": connection,
+            "database": database,
+            "schema": schema,
+            "table": table,
             "version": version,
         }
         return self._call(
@@ -2191,7 +2191,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/checkpoint
-    def manage_checkpoint_tables(
+    def update_checkpoint_table(
         self,
         connection,
         operation=None,
@@ -2221,7 +2221,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.manage_checkpoint_tables(
+            client.update_checkpoint_table(
                 connection='MYCONN',
                 data={
                     "operation": "add",
@@ -2229,7 +2229,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.manage_checkpoint_tables(
+            client.update_checkpoint_table(
                 connection='MYCONN',
                 operation='add',
                 name='ggadmin.ggs_checkpoint'
@@ -2254,7 +2254,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/heartbeat
-    def retrieve_heartbeat_table(
+    def get_heartbeat_table(
         self,
         connection,
         version='v2',
@@ -2274,7 +2274,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_heartbeat_table(
+            client.get_heartbeat_table(
                 connection='MYCONN'
             )
         """
@@ -2512,10 +2512,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/heartbeat/{process}
-    def retrieve_process_heartbeat_records(
+    def get_process_heartbeat_records(
         self,
-        process,
         connection,
+        process,
         version='v2',
         raw_response=False
     ):
@@ -2526,22 +2526,22 @@ class OGGRestAPI:
         Retrieve heartbeat table entries for an extract or replicat group.
 
         Parameters:
-            process (str): The name of the extract or replicat process. Required. Example: process_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
+            process (str): The name of the extract or replicat process. Required. Example: process_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_process_heartbeat_records(
-                process='process_example',
-                connection='MYCONN'
+            client.get_process_heartbeat_records(
+                connection='MYCONN',
+                process='process_example'
             )
         """
         path_params = {
-            "process": process,
             "connection": connection,
+            "process": process,
             "version": version,
         }
         return self._call(
@@ -2555,8 +2555,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/connections/{connection}/tables/heartbeat/{process}
     def delete_process_heartbeat_records(
         self,
-        process,
         connection,
+        process,
         version='v2',
         raw_response=False
     ):
@@ -2567,22 +2567,22 @@ class OGGRestAPI:
         Delete heartbeat table entries for an extract or replicat group.
 
         Parameters:
-            process (str): The name of the extract or replicat process. Required. Example: process_example
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
+            process (str): The name of the extract or replicat process. Required. Example: process_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.delete_process_heartbeat_records(
-                process='process_example',
-                connection='MYCONN'
+                connection='MYCONN',
+                process='process_example'
             )
         """
         path_params = {
-            "process": process,
             "connection": connection,
+            "process": process,
             "version": version,
         }
         return self._call(
@@ -2594,7 +2594,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/heartbeatData
-    def retrieve_heartbeat_table_entries(
+    def get_heartbeat_data(
         self,
         connection,
         version='v2',
@@ -2614,7 +2614,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_heartbeat_table_entries(
+            client.get_heartbeat_data(
                 connection='MYCONN'
             )
         """
@@ -2631,7 +2631,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/trandata/procedure
-    def manage_procedural_supplemental_logging(
+    def update_procedural_supplemental_logging(
         self,
         connection,
         operation=None,
@@ -2656,14 +2656,14 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.manage_procedural_supplemental_logging(
+            client.update_procedural_supplemental_logging(
                 connection='MYCONN',
                 data={
                     "operation": "info"
                 }
             )
 
-            client.manage_procedural_supplemental_logging(
+            client.update_procedural_supplemental_logging(
                 connection='MYCONN',
                 operation='info'
             )
@@ -2685,7 +2685,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/trandata/schema
-    def manage_schema_supplemental_logging(
+    def update_schema_supplemental_logging(
         self,
         connection,
         data=None,
@@ -2707,7 +2707,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.manage_schema_supplemental_logging(
+            client.update_schema_supplemental_logging(
                 connection='MYCONN',
                 data={
                     "operation": "info",
@@ -2729,7 +2729,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/trandata/table
-    def manage_table_supplemental_logging(
+    def update_table_supplemental_logging(
         self,
         connection,
         data=None,
@@ -2751,7 +2751,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.manage_table_supplemental_logging(
+            client.update_table_supplemental_logging(
                 connection='MYCONN',
                 data={
                     "$schema": "ogg:trandataTable",
@@ -2774,7 +2774,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/content
-    def static_files(
+    def get_content(
         self,
         version='v2',
         ogg_service='',
@@ -2794,7 +2794,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.static_files(
+            client.get_content(
                 ogg_service='adminsrvr'
             )
         """
@@ -2842,7 +2842,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/credentials/{domain}
-    def list_domain_aliases(
+    def list_credentials(
         self,
         domain,
         version='v2',
@@ -2861,7 +2861,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_domain_aliases(
+            client.list_credentials(
                 domain='OracleGoldenGate'
             )
         """
@@ -2878,10 +2878,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/credentials/{domain}/{alias}
-    def retrieve_alias(
+    def get_alias(
         self,
-        alias,
         domain,
+        alias,
         version='v2',
         raw_response=False
     ):
@@ -2893,21 +2893,21 @@ class OGGRestAPI:
             will not be returned.
 
         Parameters:
-            alias (str): Credential store alias. Required. Example: ggnorth
             domain (str): Credential store domain name. Required. Example: OracleGoldenGate
+            alias (str): Credential store alias. Required. Example: ggnorth
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_alias(
-                alias='ggnorth',
-                domain='OracleGoldenGate'
+            client.get_alias(
+                domain='OracleGoldenGate',
+                alias='ggnorth'
             )
         """
         path_params = {
-            "alias": alias,
             "domain": domain,
+            "alias": alias,
             "version": version,
         }
         return self._call(
@@ -2921,8 +2921,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/credentials/{domain}/{alias}
     def create_alias(
         self,
-        alias,
         domain,
+        alias,
         userid=None,
         password=None,
         data=None,
@@ -2937,8 +2937,8 @@ class OGGRestAPI:
         Create a new alias in the credential store.
 
         Parameters:
-            alias (str): Credential store alias. Required. Example: ggnorth
             domain (str): Credential store domain name. Required. Example: OracleGoldenGate
+            alias (str): Credential store alias. Required. Example: ggnorth
             userid (str):  Example: userid_example
             password (str):  Example: password_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
@@ -2951,8 +2951,8 @@ class OGGRestAPI:
 
         Example:
             client.create_alias(
-                alias='ggnorth',
                 domain='OracleGoldenGate',
+                alias='ggnorth',
                 data={
                     "userid": "c##ggadmin@//server1.dc1.north.example.com:1521/ORCLCDB",
                     "password": "password-DB_A1"
@@ -2960,15 +2960,15 @@ class OGGRestAPI:
             )
 
             client.create_alias(
-                alias='ggnorth',
                 domain='OracleGoldenGate',
+                alias='ggnorth',
                 userid='c##ggadmin@//server1.dc1.north.example.com:1521/ORCLCDB',
                 password='password-DB_A1'
             )
         """
         path_params = {
-            "alias": alias,
             "domain": domain,
+            "alias": alias,
             "version": version,
         }
         return self._call(
@@ -2986,10 +2986,50 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/credentials/{domain}/{alias}
-    def replace_alias(
+    def delete_alias(
         self,
-        alias,
         domain,
+        alias,
+        version='v2',
+        raw_response=False
+    ):
+        """
+        Administration Service/Credentials
+        DELETE /services/{version}/credentials/{domain}/{alias}
+        Required Role: Administrator
+        Delete an alias from the credential store.
+
+        Parameters:
+            domain (str): Credential store domain name. Required. Example: OracleGoldenGate
+            alias (str): Credential store alias. Required. Example: ggnorth
+            version (str): Defaults to v2. Example: v2
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.delete_alias(
+                domain='OracleGoldenGate',
+                alias='ggnorth'
+            )
+        """
+        path_params = {
+            "domain": domain,
+            "alias": alias,
+            "version": version,
+        }
+        return self._call(
+            "DELETE",
+            "/services/{version}/credentials/{domain}/{alias}",
+            path_params=path_params,
+            ogg_service="adminsrvr",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/credentials/{domain}/{alias}
+    def update_alias(
+        self,
+        domain,
+        alias,
         userid=None,
         password=None,
         data=None,
@@ -3003,8 +3043,8 @@ class OGGRestAPI:
         Update an alias in the credential store.
 
         Parameters:
-            alias (str): Credential store alias. Required. Example: ggnorth
             domain (str): Credential store domain name. Required. Example: OracleGoldenGate
+            alias (str): Credential store alias. Required. Example: ggnorth
             userid (str):  Example: userid_example
             password (str):  Example: password_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
@@ -3014,25 +3054,25 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.replace_alias(
-                alias='ggnorth',
+            client.update_alias(
                 domain='OracleGoldenGate',
+                alias='ggnorth',
                 data={
                     "userid": "ggadmin@//server1.dc1.west.example.com:1521/dbwest_pdb1",
                     "password": "password-DB_A1"
                 }
             )
 
-            client.replace_alias(
-                alias='ggnorth',
+            client.update_alias(
                 domain='OracleGoldenGate',
+                alias='ggnorth',
                 userid='ggadmin@//server1.dc1.west.example.com:1521/dbwest_pdb1',
                 password='password-DB_A1'
             )
         """
         path_params = {
-            "alias": alias,
             "domain": domain,
+            "alias": alias,
             "version": version,
         }
         return self._call(
@@ -3048,51 +3088,11 @@ class OGGRestAPI:
             raw_response=raw_response
         )
 
-    # Endpoint: /services/{version}/credentials/{domain}/{alias}
-    def delete_alias(
-        self,
-        alias,
-        domain,
-        version='v2',
-        raw_response=False
-    ):
-        """
-        Administration Service/Credentials
-        DELETE /services/{version}/credentials/{domain}/{alias}
-        Required Role: Administrator
-        Delete an alias from the credential store.
-
-        Parameters:
-            alias (str): Credential store alias. Required. Example: ggnorth
-            domain (str): Credential store domain name. Required. Example: OracleGoldenGate
-            version (str): Defaults to v2. Example: v2
-            raw_response (bool): If True, return raw parsed response from _parse() instead of
-                _extract_main().
-
-        Example:
-            client.delete_alias(
-                alias='ggnorth',
-                domain='OracleGoldenGate'
-            )
-        """
-        path_params = {
-            "alias": alias,
-            "domain": domain,
-            "version": version,
-        }
-        return self._call(
-            "DELETE",
-            "/services/{version}/credentials/{domain}/{alias}",
-            path_params=path_params,
-            ogg_service="adminsrvr",
-            raw_response=raw_response
-        )
-
     # Endpoint: /services/{version}/credentials/{domain}/{alias}/valid
-    def validate(
+    def is_credential_valid(
         self,
-        alias,
         domain,
+        alias,
         version='v2',
         raw_response=False
     ):
@@ -3103,21 +3103,21 @@ class OGGRestAPI:
         Check validity of credentials and return database credentials details.
 
         Parameters:
-            alias (str): Credential store alias. Required. Example: ggnorth
             domain (str): Credential store domain name. Required. Example: OracleGoldenGate
+            alias (str): Credential store alias. Required. Example: ggnorth
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.validate(
-                alias='ggnorth',
-                domain='OracleGoldenGate'
+            client.is_credential_valid(
+                domain='OracleGoldenGate',
+                alias='ggnorth'
             )
         """
         path_params = {
-            "alias": alias,
             "domain": domain,
+            "alias": alias,
             "version": version,
         }
         return self._call(
@@ -3129,7 +3129,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/currentuser
-    def retrieve_information(
+    def get_current_user(
         self,
         version='v2',
         ogg_service='',
@@ -3149,7 +3149,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_information(
+            client.get_current_user(
                 ogg_service='adminsrvr'
             )
         """
@@ -3165,7 +3165,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/currentuser
-    def reset_information(
+    def delete_current_user(
         self,
         version='v2',
         ogg_service='',
@@ -3185,7 +3185,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.reset_information(
+            client.delete_current_user(
                 ogg_service='adminsrvr'
             )
         """
@@ -3201,7 +3201,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/currentuser/reauthorize
-    def use_this_endpoint_to_reauthorize_current_user(
+    def reauthorize_current_user(
         self,
         version='v2',
         raw_response=False
@@ -3218,7 +3218,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.use_this_endpoint_to_reauthorize_current_user()
+            client.reauthorize_current_user()
 
         """
         path_params = {
@@ -3232,7 +3232,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/dataTargetTypes
-    def types(
+    def list_data_target_types(
         self,
         version='v2',
         raw_response=False
@@ -3249,7 +3249,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.types()
+            client.list_data_target_types()
 
         """
         path_params = {
@@ -3264,7 +3264,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/dataTargetTypes/{dataTargetType}
-    def json_schema(
+    def get_data_target_type(
         self,
         dataTargetType,
         version='v2',
@@ -3284,7 +3284,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.json_schema(
+            client.get_data_target_type(
                 dataTargetType='dataTargetType_example'
             )
         """
@@ -3301,7 +3301,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/datastore
-    def retrieve(
+    def get_datastore(
         self,
         version='v2',
         raw_response=False
@@ -3318,7 +3318,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve()
+            client.get_datastore()
 
         """
         path_params = {
@@ -3333,7 +3333,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/datastore
-    def update(
+    def update_datastore(
         self,
         retentionDays=None,
         collectorWorkerThreads=None,
@@ -3380,7 +3380,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update(
+            client.update_datastore(
                 data={
                     "type": "LMDB",
                     "retentionDays": "30",
@@ -3391,7 +3391,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.update(
+            client.update_datastore(
                 retentionDays='30',
                 collectorWorkerThreads='5',
                 path=None,
@@ -3459,7 +3459,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}
-    def remove_deployment(
+    def get_deployment(
         self,
         deployment,
         version='v2',
@@ -3467,9 +3467,9 @@ class OGGRestAPI:
     ):
         """
         Service Manager/Deployments
-        DELETE /services/{version}/deployments/{deployment}
-        Required Role: Administrator
-        Delete a deployment.
+        GET /services/{version}/deployments/{deployment}
+        Required Role: User
+        Retrieve the details of a deployment.
 
         Parameters:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
@@ -3479,7 +3479,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.remove_deployment(
+            client.get_deployment(
                 deployment='deployment_example'
             )
         """
@@ -3488,7 +3488,7 @@ class OGGRestAPI:
             "version": version,
         }
         return self._call(
-            "DELETE",
+            "GET",
             "/services/{version}/deployments/{deployment}",
             path_params=path_params,
             ogg_service="ServiceManager",
@@ -3755,7 +3755,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}
-    def retrieve_deployment(
+    def delete_deployment(
         self,
         deployment,
         version='v2',
@@ -3763,9 +3763,9 @@ class OGGRestAPI:
     ):
         """
         Service Manager/Deployments
-        GET /services/{version}/deployments/{deployment}
-        Required Role: User
-        Retrieve the details of a deployment.
+        DELETE /services/{version}/deployments/{deployment}
+        Required Role: Administrator
+        Delete a deployment.
 
         Parameters:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
@@ -3775,7 +3775,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_deployment(
+            client.delete_deployment(
                 deployment='deployment_example'
             )
         """
@@ -3784,7 +3784,7 @@ class OGGRestAPI:
             "version": version,
         }
         return self._call(
-            "GET",
+            "DELETE",
             "/services/{version}/deployments/{deployment}",
             path_params=path_params,
             ogg_service="ServiceManager",
@@ -3792,7 +3792,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/authorization/profiles
-    def get_authorization_profiles(
+    def list_authorization_profiles(
         self,
         deployment,
         version='v2',
@@ -3812,7 +3812,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_authorization_profiles(
+            client.list_authorization_profiles(
                 deployment='deployment_example'
             )
         """
@@ -3831,8 +3831,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/deployments/{deployment}/authorization/profiles/{profile}
     def get_authorization_profile(
         self,
-        profile,
         deployment,
+        profile,
         version='v2',
         raw_response=False
     ):
@@ -3843,22 +3843,22 @@ class OGGRestAPI:
         Get the content of a specific Authorization profile in a given deployment
 
         Parameters:
-            profile (str): Name of Authorization profile. Required. Example: profile_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            profile (str): Name of Authorization profile. Required. Example: profile_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.get_authorization_profile(
-                profile='profile_example',
-                deployment='deployment_example'
+                deployment='deployment_example',
+                profile='profile_example'
             )
         """
         path_params = {
-            "profile": profile,
             "deployment": deployment,
+            "profile": profile,
             "version": version,
         }
         return self._call(
@@ -3872,8 +3872,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/deployments/{deployment}/authorization/profiles/{profile}
     def create_authorization_profile(
         self,
-        profile,
         deployment,
+        profile,
         data=None,
         version='v2',
         raw_response=False,
@@ -3886,9 +3886,9 @@ class OGGRestAPI:
         Create an Authorization profile in a given deployment
 
         Parameters:
-            profile (str): Name of Authorization profile. Required. Example: profile_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            profile (str): Name of Authorization profile. Required. Example: profile_example
             data (dict): Data payload. See call example below for more details.
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -3898,8 +3898,8 @@ class OGGRestAPI:
 
         Example:
             client.create_authorization_profile(
-                profile='profile_example',
                 deployment='deployment_example',
+                profile='profile_example',
                 data={
                     "type": "idcs",
                     "clientID": "4a33ef81bf1642689ac83742a27b8a94",
@@ -3912,8 +3912,8 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "profile": profile,
             "deployment": deployment,
+            "profile": profile,
             "version": version,
         }
         return self._call(
@@ -3927,10 +3927,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/authorization/profiles/{profile}
-    def patch_authorization_profile(
+    def update_authorization_profile(
         self,
-        profile,
         deployment,
+        profile,
         data=None,
         version='v2',
         raw_response=False
@@ -3942,18 +3942,18 @@ class OGGRestAPI:
         Patch the content of a given profile
 
         Parameters:
-            profile (str): Name of Authorization profile. Required. Example: profile_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            profile (str): Name of Authorization profile. Required. Example: profile_example
             data (dict): Data payload. See call example below for more details.
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.patch_authorization_profile(
-                profile='profile_example',
+            client.update_authorization_profile(
                 deployment='deployment_example',
+                profile='profile_example',
                 data={
                     "clientID": "4a33ef81bf1642689ac83742a27b8a94",
                     "clientSecret": "166155e9-884d-4eb3-9733-21f98f0698bc",
@@ -3967,8 +3967,8 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "profile": profile,
             "deployment": deployment,
+            "profile": profile,
             "version": version,
         }
         return self._call(
@@ -3983,8 +3983,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/deployments/{deployment}/authorization/profiles/{profile}
     def delete_authorization_profile(
         self,
-        profile,
         deployment,
+        profile,
         version='v2',
         raw_response=False
     ):
@@ -3995,22 +3995,22 @@ class OGGRestAPI:
         Delete an Authorization profile from a given deployment
 
         Parameters:
-            profile (str): Name of Authorization profile. Required. Example: profile_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            profile (str): Name of Authorization profile. Required. Example: profile_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.delete_authorization_profile(
-                profile='profile_example',
-                deployment='deployment_example'
+                deployment='deployment_example',
+                profile='profile_example'
             )
         """
         path_params = {
-            "profile": profile,
             "deployment": deployment,
+            "profile": profile,
             "version": version,
         }
         return self._call(
@@ -4022,10 +4022,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/authorization/profiles/{profile}/valid
-    def test_authorization_profile(
+    def is_authorization_profile_valid(
         self,
-        profile,
         deployment,
+        profile,
         version='v2',
         raw_response=False
     ):
@@ -4036,22 +4036,22 @@ class OGGRestAPI:
         Test the connection to the Authorization Tenant
 
         Parameters:
-            profile (str): Name of Authorization profile. Required. Example: profile_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            profile (str): Name of Authorization profile. Required. Example: profile_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.test_authorization_profile(
-                profile='profile_example',
-                deployment='deployment_example'
+            client.is_authorization_profile_valid(
+                deployment='deployment_example',
+                profile='profile_example'
             )
         """
         path_params = {
-            "profile": profile,
             "deployment": deployment,
+            "profile": profile,
             "version": version,
         }
         return self._call(
@@ -4063,7 +4063,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/certificates
-    def retrieve_available_certificate_types_deployment(
+    def list_deployment_certificates_types(
         self,
         deployment,
         version='v2',
@@ -4083,7 +4083,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_available_certificate_types_deployment(
+            client.list_deployment_certificates_types(
                 deployment='deployment_example'
             )
         """
@@ -4100,7 +4100,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}
-    def retrieve_certificate_types(
+    def list_deployment_certificates(
         self,
         deployment,
         type,
@@ -4122,7 +4122,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_certificate_types(
+            client.list_deployment_certificates(
                 deployment='deployment_example',
                 type='type_example'
             )
@@ -4141,11 +4141,11 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
-    def retrieve_certificate_deployment(
+    def get_deployment_certificate(
         self,
-        certificate,
         deployment,
         type,
+        certificate,
         version='v2',
         raw_response=False
     ):
@@ -4156,25 +4156,25 @@ class OGGRestAPI:
         Retrieve the certificate PEM data for the named certificate in the deployment.
 
         Parameters:
-            certificate (str): Deployment certificate name. Required. Example: certificate_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
             type (str): Required. Example: type_example
+            certificate (str): Deployment certificate name. Required. Example: certificate_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_certificate_deployment(
-                certificate='certificate_example',
+            client.get_deployment_certificate(
                 deployment='deployment_example',
-                type='type_example'
+                type='type_example',
+                certificate='certificate_example'
             )
         """
         path_params = {
-            "certificate": certificate,
             "deployment": deployment,
             "type": type,
+            "certificate": certificate,
             "version": version,
         }
         return self._call(
@@ -4186,11 +4186,11 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
-    def add_named_certificate(
+    def create_deployment_certificate(
         self,
-        certificate,
         deployment,
         type,
+        certificate,
         data=None,
         version='v2',
         raw_response=False,
@@ -4204,10 +4204,10 @@ class OGGRestAPI:
             deployment.
 
         Parameters:
-            certificate (str): Deployment certificate name. Required. Example: certificate_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
             type (str): Required. Example: type_example
+            certificate (str): Deployment certificate name. Required. Example: certificate_example
             data (dict): Data payload. See call example below for more details.
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -4216,10 +4216,10 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.add_named_certificate(
-                certificate='certificate_example',
+            client.create_deployment_certificate(
                 deployment='deployment_example',
                 type='type_example',
+                certificate='certificate_example',
                 data={
                     "certificateBundle": {
                         "caCertificates": [
@@ -4232,9 +4232,9 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "certificate": certificate,
             "deployment": deployment,
             "type": type,
+            "certificate": certificate,
             "version": version,
         }
         return self._call(
@@ -4248,11 +4248,56 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
-    def replace_named_certificate(
+    def delete_deployment_certificate(
         self,
-        certificate,
         deployment,
         type,
+        certificate,
+        version='v2',
+        raw_response=False
+    ):
+        """
+        Service Manager/Certificates
+        DELETE /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
+        Required Role: Security
+        Delete a named certificate from a deployment. The certificate name must exist in the deployment.
+
+        Parameters:
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            type (str): Required. Example: type_example
+            certificate (str): Deployment certificate name. Required. Example: certificate_example
+            version (str): Defaults to v2. Example: v2
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.delete_deployment_certificate(
+                deployment='deployment_example',
+                type='type_example',
+                certificate='certificate_example'
+            )
+        """
+        path_params = {
+            "deployment": deployment,
+            "type": type,
+            "certificate": certificate,
+            "version": version,
+        }
+        return self._call(
+            "DELETE",
+            "/services/{version}/deployments/{deployment}/certificates/{type}/{certificate}",
+            path_params=path_params,
+            ogg_service="ServiceManager",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
+    def update_deployment_certificate(
+        self,
+        deployment,
+        type,
+        certificate,
         data=None,
         version='v2',
         raw_response=False
@@ -4264,20 +4309,20 @@ class OGGRestAPI:
         Replace a named certificate in a deployment. The certificate name must exist in the deployment.
 
         Parameters:
-            certificate (str): Deployment certificate name. Required. Example: certificate_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
             type (str): Required. Example: type_example
+            certificate (str): Deployment certificate name. Required. Example: certificate_example
             data (dict): Data payload. See call example below for more details.
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.replace_named_certificate(
-                certificate='certificate_example',
+            client.update_deployment_certificate(
                 deployment='deployment_example',
                 type='type_example',
+                certificate='certificate_example',
                 data={
                     "certificateBundle": {
                         "caCertificates": [
@@ -4290,9 +4335,9 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "certificate": certificate,
             "deployment": deployment,
             "type": type,
+            "certificate": certificate,
             "version": version,
         }
         return self._call(
@@ -4304,57 +4349,12 @@ class OGGRestAPI:
             raw_response=raw_response
         )
 
-    # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
-    def delete_named_certificate(
-        self,
-        certificate,
-        deployment,
-        type,
-        version='v2',
-        raw_response=False
-    ):
-        """
-        Service Manager/Certificates
-        DELETE /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}
-        Required Role: Security
-        Delete a named certificate from a deployment. The certificate name must exist in the deployment.
-
-        Parameters:
-            certificate (str): Deployment certificate name. Required. Example: certificate_example
-            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
-                deployment_example
-            type (str): Required. Example: type_example
-            version (str): Defaults to v2. Example: v2
-            raw_response (bool): If True, return raw parsed response from _parse() instead of
-                _extract_main().
-
-        Example:
-            client.delete_named_certificate(
-                certificate='certificate_example',
-                deployment='deployment_example',
-                type='type_example'
-            )
-        """
-        path_params = {
-            "certificate": certificate,
-            "deployment": deployment,
-            "type": type,
-            "version": version,
-        }
-        return self._call(
-            "DELETE",
-            "/services/{version}/deployments/{deployment}/certificates/{type}/{certificate}",
-            path_params=path_params,
-            ogg_service="ServiceManager",
-            raw_response=raw_response
-        )
-
     # Endpoint: /services/{version}/deployments/{deployment}/certificates/{type}/{certificate}/info
-    def retrieve_certificate_information_deployment(
+    def get_deployment_certificate_info(
         self,
-        certificate,
         deployment,
         type,
+        certificate,
         version='v2',
         raw_response=False
     ):
@@ -4365,25 +4365,25 @@ class OGGRestAPI:
         Retrieve the certificate information for the named certificate in the deployment.
 
         Parameters:
-            certificate (str): Deployment certificate name. Required. Example: certificate_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
             type (str): Required. Example: type_example
+            certificate (str): Deployment certificate name. Required. Example: certificate_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_certificate_information_deployment(
-                certificate='certificate_example',
+            client.get_deployment_certificate_info(
                 deployment='deployment_example',
-                type='type_example'
+                type='type_example',
+                certificate='certificate_example'
             )
         """
         path_params = {
-            "certificate": certificate,
             "deployment": deployment,
             "type": type,
+            "certificate": certificate,
             "version": version,
         }
         return self._call(
@@ -4395,7 +4395,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/plugin/templates
-    def get_plugin_templates(
+    def list_plugin_templates(
         self,
         deployment,
         version='v2',
@@ -4415,7 +4415,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_plugin_templates(
+            client.list_plugin_templates(
                 deployment='deployment_example'
             )
         """
@@ -4434,8 +4434,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/deployments/{deployment}/plugin/templates/{plugin}
     def get_plugin_template(
         self,
-        plugin,
         deployment,
+        plugin,
         version='v2',
         raw_response=False
     ):
@@ -4446,22 +4446,22 @@ class OGGRestAPI:
         Get the content of a specific plugin template in a given deployment
 
         Parameters:
-            plugin (str): Name of plugin for the template. Required. Example: plugin_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            plugin (str): Name of plugin for the template. Required. Example: plugin_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.get_plugin_template(
-                plugin='plugin_example',
-                deployment='deployment_example'
+                deployment='deployment_example',
+                plugin='plugin_example'
             )
         """
         path_params = {
-            "plugin": plugin,
             "deployment": deployment,
+            "plugin": plugin,
             "version": version,
         }
         return self._call(
@@ -4475,8 +4475,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/deployments/{deployment}/plugin/templates/{plugin}
     def create_plugin_template(
         self,
-        plugin,
         deployment,
+        plugin,
         metadata=None,
         data=None,
         version='v2',
@@ -4490,9 +4490,9 @@ class OGGRestAPI:
         Create a plugin template in a given deployment
 
         Parameters:
-            plugin (str): Name of plugin for the template. Required. Example: plugin_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            plugin (str): Name of plugin for the template. Required. Example: plugin_example
             metadata (list): Array of metadata key/value pairs. Required if not included in `data`. Example:
                 metadata_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
@@ -4505,8 +4505,8 @@ class OGGRestAPI:
 
         Example:
             client.create_plugin_template(
-                plugin='plugin_example',
                 deployment='deployment_example',
+                plugin='plugin_example',
                 data={
                     "$schema": "ogg:pluginMetadata",
                     "metadata": [
@@ -4527,8 +4527,8 @@ class OGGRestAPI:
             )
 
             client.create_plugin_template(
-                plugin='plugin_example',
                 deployment='deployment_example',
+                plugin='plugin_example',
                 metadata=[
                     {
                         "name": "OCI_VAULTKEY_OCID",
@@ -4546,8 +4546,8 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "plugin": plugin,
             "deployment": deployment,
+            "plugin": plugin,
             "version": version,
         }
         return self._call(
@@ -4564,10 +4564,51 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/plugin/templates/{plugin}
+    def delete_plugin_template(
+        self,
+        deployment,
+        plugin,
+        version='v2',
+        raw_response=False
+    ):
+        """
+        Service Manager/Plugin Templates
+        DELETE /services/{version}/deployments/{deployment}/plugin/templates/{plugin}
+        Required Role: Security
+        Delete a plugin template from a given deployment
+
+        Parameters:
+            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
+                deployment_example
+            plugin (str): Name of plugin for the template. Required. Example: plugin_example
+            version (str): Defaults to v2. Example: v2
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.delete_plugin_template(
+                deployment='deployment_example',
+                plugin='plugin_example'
+            )
+        """
+        path_params = {
+            "deployment": deployment,
+            "plugin": plugin,
+            "version": version,
+        }
+        return self._call(
+            "DELETE",
+            "/services/{version}/deployments/{deployment}/plugin/templates/{plugin}",
+            path_params=path_params,
+            ogg_service="ServiceManager",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/deployments/{deployment}/plugin/templates/{plugin}
     def update_plugin_template(
         self,
-        plugin,
         deployment,
+        plugin,
         metadata=None,
         data=None,
         version='v2',
@@ -4580,9 +4621,9 @@ class OGGRestAPI:
         Update the content of a given plugin template
 
         Parameters:
-            plugin (str): Name of plugin for the template. Required. Example: plugin_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            plugin (str): Name of plugin for the template. Required. Example: plugin_example
             metadata (list): Array of metadata key/value pairs. Required if not included in `data`. Example:
                 metadata_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
@@ -4593,8 +4634,8 @@ class OGGRestAPI:
 
         Example:
             client.update_plugin_template(
-                plugin='plugin_example',
                 deployment='deployment_example',
+                plugin='plugin_example',
                 data={
                     "$schema": "ogg:pluginMetadata",
                     "metadata": [
@@ -4611,8 +4652,8 @@ class OGGRestAPI:
             )
 
             client.update_plugin_template(
-                plugin='plugin_example',
                 deployment='deployment_example',
+                plugin='plugin_example',
                 metadata=[
                     {
                         "name": "OCI_VAULTKEY_OCID",
@@ -4626,8 +4667,8 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "plugin": plugin,
             "deployment": deployment,
+            "plugin": plugin,
             "version": version,
         }
         return self._call(
@@ -4638,47 +4679,6 @@ class OGGRestAPI:
             body_params={
                 "metadata": metadata,
             },
-            ogg_service="ServiceManager",
-            raw_response=raw_response
-        )
-
-    # Endpoint: /services/{version}/deployments/{deployment}/plugin/templates/{plugin}
-    def delete_plugin_template(
-        self,
-        plugin,
-        deployment,
-        version='v2',
-        raw_response=False
-    ):
-        """
-        Service Manager/Plugin Templates
-        DELETE /services/{version}/deployments/{deployment}/plugin/templates/{plugin}
-        Required Role: Security
-        Delete a plugin template from a given deployment
-
-        Parameters:
-            plugin (str): Name of plugin for the template. Required. Example: plugin_example
-            deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
-                deployment_example
-            version (str): Defaults to v2. Example: v2
-            raw_response (bool): If True, return raw parsed response from _parse() instead of
-                _extract_main().
-
-        Example:
-            client.delete_plugin_template(
-                plugin='plugin_example',
-                deployment='deployment_example'
-            )
-        """
-        path_params = {
-            "plugin": plugin,
-            "deployment": deployment,
-            "version": version,
-        }
-        return self._call(
-            "DELETE",
-            "/services/{version}/deployments/{deployment}/plugin/templates/{plugin}",
-            path_params=path_params,
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
@@ -4721,10 +4721,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}
-    def retrieve_service(
+    def get_service(
         self,
-        service,
         deployment,
+        service,
         version='v2',
         raw_response=False
     ):
@@ -4735,22 +4735,22 @@ class OGGRestAPI:
         Retrieve the details of a service in an Oracle GoldenGate deployment.
 
         Parameters:
-            service (str): Name of the service. Required. Example: service_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            service (str): Name of the service. Required. Example: service_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_service(
-                service='service_example',
-                deployment='deployment_example'
+            client.get_service(
+                deployment='deployment_example',
+                service='service_example'
             )
         """
         path_params = {
-            "service": service,
             "deployment": deployment,
+            "service": service,
             "version": version,
         }
         return self._call(
@@ -4764,8 +4764,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}
     def create_service(
         self,
-        service,
         deployment,
+        service,
         config=None,
         quiet=None,
         enabled=None,
@@ -4788,9 +4788,9 @@ class OGGRestAPI:
             succeed.
 
         Parameters:
-            service (str): Name of the service. Required. Example: service_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            service (str): Name of the service. Required. Example: service_example
             config (dict): Service configuration data. Example: config_example
             quiet (bool): Start the service in quiet mode. Example: quiet_example
             enabled (bool): Indicates the service is managed by the Service Manager. Example:
@@ -4812,8 +4812,8 @@ class OGGRestAPI:
 
         Example:
             client.create_service(
-                service='service_example',
                 deployment='deployment_example',
+                service='service_example',
                 data={
                     "$schema": "ogg:service",
                     "config": {
@@ -4832,8 +4832,8 @@ class OGGRestAPI:
             )
 
             client.create_service(
-                service='service_example',
                 deployment='deployment_example',
+                service='service_example',
                 config={
                     "network": {
                         "serviceListeningPort": "19012"
@@ -4864,8 +4864,8 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "service": service,
             "deployment": deployment,
+            "service": service,
             "version": version,
         }
         return self._call(
@@ -4890,10 +4890,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}
-    def update_service_properties(
+    def update_service(
         self,
-        service,
         deployment,
+        service,
         config=None,
         quiet=None,
         enabled=None,
@@ -4914,9 +4914,9 @@ class OGGRestAPI:
         Update the properties of a service.
 
         Parameters:
-            service (str): Name of the service. Required. Example: service_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            service (str): Name of the service. Required. Example: service_example
             config (dict): Service configuration data. Example: config_example
             quiet (bool): Start the service in quiet mode. Example: quiet_example
             enabled (bool): Indicates the service is managed by the Service Manager. Example:
@@ -4935,18 +4935,18 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_service_properties(
-                service='service_example',
+            client.update_service(
                 deployment='deployment_example',
+                service='service_example',
                 data={
                     "enabled": True,
                     "status": "running"
                 }
             )
 
-            client.update_service_properties(
-                service='service_example',
+            client.update_service(
                 deployment='deployment_example',
+                service='service_example',
                 config=None,
                 quiet=None,
                 enabled=True,
@@ -4967,8 +4967,8 @@ class OGGRestAPI:
             )
         """
         path_params = {
-            "service": service,
             "deployment": deployment,
+            "service": service,
             "version": version,
         }
         return self._call(
@@ -4992,10 +4992,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}
-    def remove_service(
+    def delete_service(
         self,
-        service,
         deployment,
+        service,
         version='v2',
         raw_response=False
     ):
@@ -5006,22 +5006,22 @@ class OGGRestAPI:
         Remove a service from an Oracle GoldenGate deployment.
 
         Parameters:
-            service (str): Name of the service. Required. Example: service_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            service (str): Name of the service. Required. Example: service_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.remove_service(
-                service='service_example',
-                deployment='deployment_example'
+            client.delete_service(
+                deployment='deployment_example',
+                service='service_example'
             )
         """
         path_params = {
-            "service": service,
             "deployment": deployment,
+            "service": service,
             "version": version,
         }
         return self._call(
@@ -5035,8 +5035,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}/logs
     def list_service_logs(
         self,
-        service,
         deployment,
+        service,
         version='v2',
         raw_response=False
     ):
@@ -5047,22 +5047,22 @@ class OGGRestAPI:
         Retrieve the set of logs for the service
 
         Parameters:
-            service (str): Name of the service. Required. Example: service_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            service (str): Name of the service. Required. Example: service_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.list_service_logs(
-                service='service_example',
-                deployment='deployment_example'
+                deployment='deployment_example',
+                service='service_example'
             )
         """
         path_params = {
-            "service": service,
             "deployment": deployment,
+            "service": service,
             "version": version,
         }
         return self._call(
@@ -5074,10 +5074,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/deployments/{deployment}/services/{service}/logs/default
-    def default_log(
+    def get_service_log(
         self,
-        service,
         deployment,
+        service,
         version='v2',
         raw_response=False
     ):
@@ -5088,22 +5088,22 @@ class OGGRestAPI:
         Retrieve the service log
 
         Parameters:
-            service (str): Name of the service. Required. Example: service_example
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
+            service (str): Name of the service. Required. Example: service_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.default_log(
-                service='service_example',
-                deployment='deployment_example'
+            client.get_service_log(
+                deployment='deployment_example',
+                service='service_example'
             )
         """
         path_params = {
-            "service": service,
             "deployment": deployment,
+            "service": service,
             "version": version,
         }
         return self._call(
@@ -5147,7 +5147,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/enckeys/{keyName}
-    def retrieve_encryption_key(
+    def get_encryption_key(
         self,
         keyName,
         version='v2',
@@ -5166,7 +5166,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_encryption_key(
+            client.get_encryption_key(
                 keyName='keyName_example'
             )
         """
@@ -5354,7 +5354,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/encryption/profiles/{profile}
-    def retrieve_encryption_profile(
+    def get_encryption_profile(
         self,
         profile,
         version='v2',
@@ -5373,7 +5373,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_encryption_profile(
+            client.get_encryption_profile(
                 profile='profile_example'
             )
         """
@@ -5446,7 +5446,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/encryption/profiles/{profile}
-    def replace_encryption_profile(
+    def update_encryption_profile(
         self,
         profile,
         data=None,
@@ -5467,7 +5467,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.replace_encryption_profile(
+            client.update_encryption_profile(
                 profile='profile_example',
                 data={
                     "type": "okv",
@@ -5525,7 +5525,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/encryption/profiles/{profile}/valid
-    def validate_encryption_profile(
+    def is_encryption_profile_valid(
         self,
         profile,
         version='v2',
@@ -5544,7 +5544,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.validate_encryption_profile(
+            client.is_encryption_profile_valid(
                 profile='profile_example'
             )
         """
@@ -5593,7 +5593,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}
-    def retrieve_extract(
+    def get_extract(
         self,
         extract,
         version='v2',
@@ -5614,7 +5614,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_extract(
+            client.get_extract(
                 extract='extract_example'
             )
         """
@@ -5998,7 +5998,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/command
-    def issue_command_extract(
+    def execute_command_extract(
         self,
         extract,
         data=None,
@@ -6021,7 +6021,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.issue_command_extract(
+            client.execute_command_extract(
                 extract='extract_example',
                 data={
                     "command": "STATS",
@@ -6043,7 +6043,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info
-    def list_information_types_extract(
+    def get_extract_info_types(
         self,
         extract,
         version='v2',
@@ -6064,7 +6064,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_information_types_extract(
+            client.get_extract_info_types(
                 extract='extract_example'
             )
         """
@@ -6081,7 +6081,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/checkpoints
-    def retrieve_checkpoints_extract(
+    def get_extract_checkpoint(
         self,
         extract,
         version='v2',
@@ -6102,7 +6102,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_checkpoints_extract(
+            client.get_extract_checkpoint(
                 extract='extract_example'
             )
         """
@@ -6119,7 +6119,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/diagnostics
-    def list_diagnostics_extract(
+    def list_extract_diagnostics(
         self,
         extract,
         version='v2',
@@ -6140,7 +6140,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_diagnostics_extract(
+            client.list_extract_diagnostics(
                 extract='extract_example'
             )
         """
@@ -6157,10 +6157,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/diagnostics/{diagnostic}
-    def retrieve_diagnostics_extract(
+    def get_extract_diagnostic(
         self,
-        diagnostic,
         extract,
+        diagnostic,
         version='v2',
         raw_response=False
     ):
@@ -6171,25 +6171,25 @@ class OGGRestAPI:
         Retrieve a diagnostics result for the extract process.
 
         Parameters:
-            diagnostic (str): The name of the diagnostic results, which is the extract name and
-                '.diagnostics', followed by an optional revision number. Required. Example:
-                diagnostic_example
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
                 character followed by up to seven alpha-numeric characters. Required. Example:
                 extract_example
+            diagnostic (str): The name of the diagnostic results, which is the extract name and
+                '.diagnostics', followed by an optional revision number. Required. Example:
+                diagnostic_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_diagnostics_extract(
-                diagnostic='diagnostic_example',
-                extract='extract_example'
+            client.get_extract_diagnostic(
+                extract='extract_example',
+                diagnostic='diagnostic_example'
             )
         """
         path_params = {
-            "diagnostic": diagnostic,
             "extract": extract,
+            "diagnostic": diagnostic,
             "version": version,
         }
         return self._call(
@@ -6201,7 +6201,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/history
-    def retrieve_history_extract(
+    def get_extract_history(
         self,
         extract,
         version='v2',
@@ -6222,7 +6222,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_history_extract(
+            client.get_extract_history(
                 extract='extract_example'
             )
         """
@@ -6239,7 +6239,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/logs
-    def list_logs_extract(
+    def list_extract_logs(
         self,
         extract,
         version='v2',
@@ -6260,7 +6260,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_logs_extract(
+            client.list_extract_logs(
                 extract='extract_example'
             )
         """
@@ -6277,10 +6277,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/logs/{log}
-    def retrieve_log_extract(
+    def get_extract_log(
         self,
-        log,
         extract,
+        log,
         version='v2',
         raw_response=False
     ):
@@ -6291,24 +6291,24 @@ class OGGRestAPI:
         Retrieve a log from the extract process.
 
         Parameters:
-            log (str): The name of the log, which is the extract name, followed by an optional revision
-                number(as -number) and '.log'. Required. Example: log_example
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
                 character followed by up to seven alpha-numeric characters. Required. Example:
                 extract_example
+            log (str): The name of the log, which is the extract name, followed by an optional revision
+                number(as -number) and '.log'. Required. Example: log_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_log_extract(
-                log='log_example',
-                extract='extract_example'
+            client.get_extract_log(
+                extract='extract_example',
+                log='log_example'
             )
         """
         path_params = {
-            "log": log,
             "extract": extract,
+            "log": log,
             "version": version,
         }
         return self._call(
@@ -6320,7 +6320,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/reports
-    def list_reports_extract(
+    def list_extract_reports(
         self,
         extract,
         version='v2',
@@ -6341,7 +6341,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_reports_extract(
+            client.list_extract_reports(
                 extract='extract_example'
             )
         """
@@ -6358,10 +6358,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/reports/{report}
-    def retrieve_report_extract(
+    def get_extract_report(
         self,
-        report,
         extract,
+        report,
         version='v2',
         raw_response=False
     ):
@@ -6372,24 +6372,24 @@ class OGGRestAPI:
         Retrieve a report from the extract process.
 
         Parameters:
-            report (str): The name of the report, which is the extract name, followed by an optional
-                revision number and '.rpt'. Required. Example: report_example
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
                 character followed by up to seven alpha-numeric characters. Required. Example:
                 extract_example
+            report (str): The name of the report, which is the extract name, followed by an optional
+                revision number and '.rpt'. Required. Example: report_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_report_extract(
-                report='report_example',
-                extract='extract_example'
+            client.get_extract_report(
+                extract='extract_example',
+                report='report_example'
             )
         """
         path_params = {
-            "report": report,
             "extract": extract,
+            "report": report,
             "version": version,
         }
         return self._call(
@@ -6401,7 +6401,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/extracts/{extract}/info/status
-    def retrieve_status_extract(
+    def get_extract_status(
         self,
         extract,
         version='v2',
@@ -6422,7 +6422,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_status_extract(
+            client.get_extract_status(
                 extract='extract_example'
             )
         """
@@ -6439,7 +6439,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/exttrails
-    def get_list_deployment_extracts_with_their_trail_files(
+    def list_extract_trails(
         self,
         version='v2',
         raw_response=False
@@ -6456,7 +6456,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_list_deployment_extracts_with_their_trail_files()
+            client.list_extract_trails()
 
         """
         path_params = {
@@ -6471,7 +6471,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/cluster
-    def get_cluster_details(
+    def get_cluster(
         self,
         version='v2',
         raw_response=False
@@ -6488,7 +6488,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_cluster_details()
+            client.get_cluster()
 
         """
         path_params = {
@@ -6503,7 +6503,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/cluster
-    def add_installation_to_cluster(
+    def create_cluster(
         self,
         region=None,
         backPlane=None,
@@ -6539,7 +6539,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.add_installation_to_cluster(
+            client.create_cluster(
                 data={
                     "dataPlane": {
                         "host": "127.0.0.1",
@@ -6552,7 +6552,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.add_installation_to_cluster(
+            client.create_cluster(
                 region=None,
                 backPlane={
                     "host": "0.0.0.0",
@@ -6606,7 +6606,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/cluster
-    def remove_installation_from_cluster(
+    def delete_cluster(
         self,
         version='v2',
         raw_response=False
@@ -6623,7 +6623,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.remove_installation_from_cluster()
+            client.delete_cluster()
 
         """
         path_params = {
@@ -6638,7 +6638,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/cluster/actions/memberAdd
-    def add_remote_installation_to_cluster(
+    def add_cluster_member(
         self,
         memberName=None,
         region=None,
@@ -6673,7 +6673,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.add_remote_installation_to_cluster(
+            client.add_cluster_member(
                 data={
                     "$schema": "internal:clusterMemberAdd",
                     "memberName": "oggdev-2",
@@ -6688,7 +6688,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.add_remote_installation_to_cluster(
+            client.add_cluster_member(
                 memberName='oggdev-2',
                 region=None,
                 backPlane={
@@ -6721,7 +6721,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/cluster/role/{member}
-    def retrieve_cluster_role(
+    def get_cluster_member(
         self,
         member,
         version='v2',
@@ -6740,7 +6740,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_cluster_role(
+            client.get_cluster_member(
                 member='member_example'
             )
         """
@@ -6757,7 +6757,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/cluster/role/{member}
-    def update_cluster_role(
+    def update_cluster_member(
         self,
         member,
         memberName=None,
@@ -6785,14 +6785,14 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_cluster_role(
+            client.update_cluster_member(
                 member='member_example',
                 data={
                     "target": "backup"
                 }
             )
 
-            client.update_cluster_role(
+            client.update_cluster_member(
                 member='member_example',
                 memberName=None,
                 current=None,
@@ -6854,7 +6854,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/configuration
-    def get_configuration(
+    def get_configuration_service(
         self,
         version='v2',
         raw_response=False
@@ -6871,7 +6871,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_configuration()
+            client.get_configuration_service()
 
         """
         path_params = {
@@ -6886,7 +6886,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/configuration
-    def update_configuration(
+    def update_configuration_service(
         self,
         installationId=None,
         configurationServiceEnabled=None,
@@ -6912,7 +6912,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_configuration(
+            client.update_configuration_service(
                 data={
                     "$schema": "ogg:installationConfiguration",
                     "installationId": "5b5bee89-6e93-4920-9ac7-0a5582623a2d",
@@ -6920,7 +6920,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.update_configuration(
+            client.update_configuration_service(
                 installationId='5b5bee89-6e93-4920-9ac7-0a5582623a2d',
                 configurationServiceEnabled=True
             )
@@ -6942,7 +6942,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/configuration/backends
-    def get_backend_list(
+    def list_configuration_service_backends(
         self,
         version='v2',
         raw_response=False
@@ -6959,7 +6959,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_backend_list()
+            client.list_configuration_service_backends()
 
         """
         path_params = {
@@ -6974,7 +6974,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/configuration/backends
-    def create_backend(
+    def create_configuration_service_backend(
         self,
         id=None,
         configuration=None,
@@ -7024,7 +7024,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.create_backend(
+            client.create_configuration_service_backend(
                 data={
                     "$schema": "config:backend",
                     "id": "24d9565c-3f4d-49ea-9b1e-61df05c368c3",
@@ -7033,7 +7033,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.create_backend(
+            client.create_configuration_service_backend(
                 id='24d9565c-3f4d-49ea-9b1e-61df05c368c3',
                 configuration=None,
                 name='Temporary',
@@ -7088,7 +7088,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/configuration/backends/{backend}
-    def get_backend(
+    def get_configuration_service_backend(
         self,
         backend,
         version='v2',
@@ -7108,7 +7108,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_backend(
+            client.get_configuration_service_backend(
                 backend='backend_example'
             )
         """
@@ -7125,44 +7125,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/configuration/backends/{backend}
-    def delete_backend(
-        self,
-        backend,
-        version='v2',
-        raw_response=False
-    ):
-        """
-        Service Manager/Installation
-        DELETE /services/{version}/installation/configuration/backends/{backend}
-        Required Role: Security
-        The DELETE operation will remove the reference to the Backend identified by {backend}.
-
-        Parameters:
-            backend (str): Identifier for a Configuration Service Backend. Required. Example:
-                backend_example
-            version (str): Defaults to v2. Example: v2
-            raw_response (bool): If True, return raw parsed response from _parse() instead of
-                _extract_main().
-
-        Example:
-            client.delete_backend(
-                backend='backend_example'
-            )
-        """
-        path_params = {
-            "backend": backend,
-            "version": version,
-        }
-        return self._call(
-            "DELETE",
-            "/services/{version}/installation/configuration/backends/{backend}",
-            path_params=path_params,
-            ogg_service="ServiceManager",
-            raw_response=raw_response
-        )
-
-    # Endpoint: /services/{version}/installation/configuration/backends/{backend}
-    def update_backend(
+    def update_configuration_service_backend(
         self,
         backend,
         patches=None,
@@ -7187,7 +7150,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_backend(
+            client.update_configuration_service_backend(
                 backend='backend_example',
                 data={
                     "$schema": "type:jsonPatch",
@@ -7201,7 +7164,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.update_backend(
+            client.update_configuration_service_backend(
                 backend='backend_example',
                 patches=[
                     {
@@ -7228,8 +7191,45 @@ class OGGRestAPI:
             raw_response=raw_response
         )
 
+    # Endpoint: /services/{version}/installation/configuration/backends/{backend}
+    def delete_configuration_service_backend(
+        self,
+        backend,
+        version='v2',
+        raw_response=False
+    ):
+        """
+        Service Manager/Installation
+        DELETE /services/{version}/installation/configuration/backends/{backend}
+        Required Role: Security
+        The DELETE operation will remove the reference to the Backend identified by {backend}.
+
+        Parameters:
+            backend (str): Identifier for a Configuration Service Backend. Required. Example:
+                backend_example
+            version (str): Defaults to v2. Example: v2
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.delete_configuration_service_backend(
+                backend='backend_example'
+            )
+        """
+        path_params = {
+            "backend": backend,
+            "version": version,
+        }
+        return self._call(
+            "DELETE",
+            "/services/{version}/installation/configuration/backends/{backend}",
+            path_params=path_params,
+            ogg_service="ServiceManager",
+            raw_response=raw_response
+        )
+
     # Endpoint: /services/{version}/installation/configuration/backends/{backend}/actions/replaces
-    def replace_backend(
+    def replace_configuration_service_backend(
         self,
         backend,
         id=None,
@@ -7279,7 +7279,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.replace_backend(
+            client.replace_configuration_service_backend(
                 backend='backend_example',
                 data={
                     "$schema": "config:backend",
@@ -7287,7 +7287,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.replace_backend(
+            client.replace_configuration_service_backend(
                 backend='backend_example',
                 id='47ce3867-b4d3-413b-aafa-42649872fe54',
                 configuration=None,
@@ -7343,7 +7343,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/deployments
-    def retrieve_deployment_list(
+    def list_installation_deployments(
         self,
         version='v2',
         ogg_service='',
@@ -7363,7 +7363,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_deployment_list(
+            client.list_installation_deployments(
                 ogg_service='adminsrvr'
             )
         """
@@ -7379,7 +7379,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/plugins
-    def list_plugins(
+    def list_installation_plugins(
         self,
         version='v2',
         raw_response=False
@@ -7396,7 +7396,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_plugins()
+            client.list_installation_plugins()
 
         """
         path_params = {
@@ -7411,7 +7411,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/plugins/{plugin}
-    def get_plugin_details(
+    def get_installation_plugin(
         self,
         plugin,
         version='v2',
@@ -7430,7 +7430,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_plugin_details(
+            client.get_installation_plugin(
                 plugin='plugin_example'
             )
         """
@@ -7447,7 +7447,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/services
-    def retrieve_service_list(
+    def list_installation_services(
         self,
         version='v2',
         ogg_service='',
@@ -7467,7 +7467,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_service_list(
+            client.list_installation_services(
                 ogg_service='adminsrvr'
             )
         """
@@ -7483,7 +7483,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/logs
-    def retrieve_available_logs(
+    def list_logs(
         self,
         version='v2',
         ogg_service='',
@@ -7503,7 +7503,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_available_logs(
+            client.list_logs(
                 ogg_service='adminsrvr'
             )
         """
@@ -7519,7 +7519,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/logs/events
-    def critical_events(
+    def list_log_events(
         self,
         version='v2',
         raw_response=False
@@ -7536,7 +7536,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.critical_events()
+            client.list_log_events()
 
         """
         path_params = {
@@ -7551,7 +7551,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/logs/{log}
-    def retrieve_log(
+    def get_log(
         self,
         log,
         version='v2',
@@ -7573,7 +7573,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_log(
+            client.get_log(
                 log='log_example',
                 ogg_service='adminsrvr'
             )
@@ -7591,7 +7591,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/logs/{log}
-    def modify_log_properties(
+    def update_log(
         self,
         log,
         enabled=None,
@@ -7623,7 +7623,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.modify_log_properties(
+            client.update_log(
                 log='log_example',
                 ogg_service='adminsrvr',
                 data={
@@ -7631,7 +7631,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.modify_log_properties(
+            client.update_log(
                 log='log_example',
                 ogg_service='adminsrvr',
                 enabled=True,
@@ -7656,7 +7656,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/logs/{log}
-    def reset_log_data(
+    def delete_log(
         self,
         log,
         version='v2',
@@ -7680,7 +7680,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.reset_log_data(
+            client.delete_log(
                 log='log_example',
                 ogg_service='adminsrvr'
             )
@@ -7698,7 +7698,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/masterkey
-    def list_versions(
+    def list_master_key_versions(
         self,
         version='v2',
         raw_response=False
@@ -7715,7 +7715,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_versions()
+            client.list_master_key_versions()
 
         """
         path_params = {
@@ -7730,7 +7730,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/masterkey
-    def create_version(
+    def create_master_key_version(
         self,
         version='v2',
         raw_response=False,
@@ -7750,7 +7750,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.create_version()
+            client.create_master_key_version()
 
         """
         path_params = {
@@ -7766,7 +7766,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/masterkey/{keyVersion}
-    def retrieve_version(
+    def get_master_key_version(
         self,
         keyVersion,
         version='v2',
@@ -7785,7 +7785,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_version(
+            client.get_master_key_version(
                 keyVersion=1
             )
         """
@@ -7802,7 +7802,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/masterkey/{keyVersion}
-    def update_version(
+    def update_master_key_version(
         self,
         keyVersion,
         created=None,
@@ -7828,14 +7828,14 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_version(
+            client.update_master_key_version(
                 keyVersion=1,
                 data={
                     "status": "unavailable"
                 }
             )
 
-            client.update_version(
+            client.update_master_key_version(
                 keyVersion=1,
                 created=None,
                 status='unavailable'
@@ -7859,7 +7859,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/masterkey/{keyVersion}
-    def delete_version(
+    def delete_master_key_version(
         self,
         keyVersion,
         version='v2',
@@ -7878,7 +7878,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.delete_version(
+            client.delete_master_key_version(
                 keyVersion=1
             )
         """
@@ -7895,7 +7895,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/messages
-    def retrieve_messages(
+    def list_messages(
         self,
         version='v2',
         raw_response=False
@@ -7912,7 +7912,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_messages()
+            client.list_messages()
 
         """
         path_params = {
@@ -7927,7 +7927,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/metadata-catalog
-    def retrieve_catalog(
+    def get_metadata_catalog(
         self,
         version='v2',
         ogg_service='',
@@ -7948,7 +7948,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_catalog(
+            client.get_metadata_catalog(
                 ogg_service='adminsrvr'
             )
         """
@@ -7964,7 +7964,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/metadata-catalog/{resource}
-    def describe_catalog_item(
+    def get_metadata_catalog_resource(
         self,
         resource,
         version='v2',
@@ -7987,7 +7987,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.describe_catalog_item(
+            client.get_metadata_catalog_resource(
                 resource='resource_example',
                 ogg_service='adminsrvr'
             )
@@ -8005,7 +8005,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/commands
-    def retrieve_list_commands(
+    def list_monitoring_commands(
         self,
         version='v2',
         raw_response=False
@@ -8022,7 +8022,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_list_commands()
+            client.list_monitoring_commands()
 
         """
         path_params = {
@@ -8037,7 +8037,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/commands/execute
-    def execute_command_monitoring(
+    def execute_monitoring_command(
         self,
         data=None,
         version='v2',
@@ -8056,7 +8056,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.execute_command_monitoring(
+            client.execute_monitoring_command(
                 data={
                     "name": "purgeDatastore",
                     "daysValue": "90"
@@ -8076,7 +8076,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/lastMessageId
-    def retrieve_existing_last_message_id_number(
+    def get_last_monitoring_message_id(
         self,
         version='v2',
         raw_response=False
@@ -8093,7 +8093,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_last_message_id_number()
+            client.get_last_monitoring_message_id()
 
         """
         path_params = {
@@ -8108,7 +8108,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/lastStatusChangeId
-    def retrieve_existing_last_status_change_id_number(
+    def get_last_status_change_id(
         self,
         version='v2',
         raw_response=False
@@ -8125,7 +8125,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_last_status_change_id_number()
+            client.get_last_status_change_id()
 
         """
         path_params = {
@@ -8140,7 +8140,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/messages
-    def retrieve_existing_process_messages(
+    def get_monitoring_messages(
         self,
         version='v2',
         raw_response=False
@@ -8157,7 +8157,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_process_messages()
+            client.get_monitoring_messages()
 
         """
         path_params = {
@@ -8172,7 +8172,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/statusChanges
-    def retrieve_existing_process_status_changes(
+    def list_status_changes(
         self,
         version='v2',
         raw_response=False
@@ -8189,7 +8189,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_process_status_changes()
+            client.list_status_changes()
 
         """
         path_params = {
@@ -8204,7 +8204,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/{item}/messages
-    def retrieve_existing_process_messages_item(
+    def list_process_messages(
         self,
         item,
         version='v2',
@@ -8223,7 +8223,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_process_messages_item(
+            client.list_process_messages(
                 item='item_example'
             )
         """
@@ -8240,7 +8240,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/monitoring/{item}/statusChanges
-    def retrieve_existing_process_status_changes_item(
+    def list_process_status_changes(
         self,
         item,
         version='v2',
@@ -8259,7 +8259,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_process_status_changes_item(
+            client.list_process_status_changes(
                 item='item_example'
             )
         """
@@ -8276,7 +8276,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/processes
-    def retrieve_existing_process_information_processes(
+    def list_processes(
         self,
         version='v2',
         raw_response=False
@@ -8293,7 +8293,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_process_information_processes()
+            client.list_processes()
 
         """
         path_params = {
@@ -8308,7 +8308,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/batchSqlStatistics
-    def retrieve_existing_integrated_replicat_batch_sql_statistics(
+    def get_process_batch_sql_statistics(
         self,
         item,
         version='v2',
@@ -8327,7 +8327,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_integrated_replicat_batch_sql_statistics(
+            client.get_process_batch_sql_statistics(
                 item='item_example'
             )
         """
@@ -8344,7 +8344,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/brExtantObjectAges
-    def retrieve_existing_bounded_recovery_extant_object_ages_statistics(
+    def get_process_br_extant_object_ages(
         self,
         item,
         version='v2',
@@ -8363,7 +8363,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_bounded_recovery_extant_object_ages_statistics(
+            client.get_process_br_extant_object_ages(
                 item='item_example'
             )
         """
@@ -8380,7 +8380,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/brExtantObjectSizes
-    def retrieve_existing_bounded_recovery_extant_object_sizes_statistics(
+    def get_process_br_extant_object_sizes(
         self,
         item,
         version='v2',
@@ -8399,7 +8399,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_bounded_recovery_extant_object_sizes_statistics(
+            client.get_process_br_extant_object_sizes(
                 item='item_example'
             )
         """
@@ -8416,7 +8416,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/brObjectAges
-    def retrieve_existing_bounded_recovery_object_ages_statistics(
+    def get_process_br_object_ages(
         self,
         item,
         version='v2',
@@ -8435,7 +8435,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_bounded_recovery_object_ages_statistics(
+            client.get_process_br_object_ages(
                 item='item_example'
             )
         """
@@ -8452,7 +8452,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/brObjectSizes
-    def retrieve_existing_bounded_recovery_object_sizes_statistics(
+    def get_process_br_object_sizes(
         self,
         item,
         version='v2',
@@ -8471,7 +8471,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_bounded_recovery_object_sizes_statistics(
+            client.get_process_br_object_sizes(
                 item='item_example'
             )
         """
@@ -8488,7 +8488,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/brPoolsInfo
-    def retrieve_existing_bounded_recovery_object_pool_information(
+    def get_process_br_pools_info(
         self,
         item,
         version='v2',
@@ -8507,7 +8507,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_bounded_recovery_object_pool_information(
+            client.get_process_br_pools_info(
                 item='item_example'
             )
         """
@@ -8524,7 +8524,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/brStatus
-    def retrieve_existing_bounded_recovery_status(
+    def get_process_br_status(
         self,
         item,
         version='v2',
@@ -8543,7 +8543,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_bounded_recovery_status(
+            client.get_process_br_status(
                 item='item_example'
             )
         """
@@ -8560,7 +8560,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/cacheStatistics
-    def retrieve_existing_cache_manager_statistics(
+    def get_process_cache_statistics(
         self,
         item,
         version='v2',
@@ -8579,7 +8579,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_cache_manager_statistics(
+            client.get_process_cache_statistics(
                 item='item_example'
             )
         """
@@ -8596,7 +8596,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/configurationEr
-    def retrieve_existing_basic_configuration_information_for_extract_and_replicat(
+    def get_er_configuration(
         self,
         item,
         version='v2',
@@ -8615,7 +8615,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_basic_configuration_information_for_extract_and_replicat(
+            client.get_er_configuration(
                 item='item_example'
             )
         """
@@ -8632,7 +8632,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/configurationManager
-    def retrieve_existing_basic_configuration_information_for_manager_and_services(
+    def get_manager_configuration(
         self,
         item,
         version='v2',
@@ -8651,7 +8651,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_basic_configuration_information_for_manager_and_services(
+            client.get_manager_configuration(
                 item='item_example'
             )
         """
@@ -8668,7 +8668,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/coordinationReplicat
-    def retrieve_existing_coordinated_replicat_statistics(
+    def get_process_coordination_replicat(
         self,
         item,
         version='v2',
@@ -8687,7 +8687,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_coordinated_replicat_statistics(
+            client.get_process_coordination_replicat(
                 item='item_example'
             )
         """
@@ -8704,7 +8704,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/currentInflightTransactions
-    def retrieve_existing_in_flight_transaction_information(
+    def get_current_inflight_transactions(
         self,
         item,
         version='v2',
@@ -8723,7 +8723,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_in_flight_transaction_information(
+            client.get_current_inflight_transactions(
                 item='item_example'
             )
         """
@@ -8740,7 +8740,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/databaseInOut
-    def retrieve_existing_database_information(
+    def get_process_database_in_out(
         self,
         item,
         version='v2',
@@ -8759,7 +8759,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_database_information(
+            client.get_process_database_in_out(
                 item='item_example'
             )
         """
@@ -8776,7 +8776,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/dependencyStats
-    def retrieve_existing_statistics_about_dependencies(
+    def get_process_dependency_stats(
         self,
         item,
         version='v2',
@@ -8795,7 +8795,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_statistics_about_dependencies(
+            client.get_process_dependency_stats(
                 item='item_example'
             )
         """
@@ -8812,7 +8812,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/distsrvrChunkStats
-    def retrieve_existing_distribution_service_chunk_statistics(
+    def get_process_distsrvr_chunk_stats(
         self,
         item,
         version='v2',
@@ -8831,7 +8831,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_distribution_service_chunk_statistics(
+            client.get_process_distsrvr_chunk_stats(
                 item='item_example'
             )
         """
@@ -8848,7 +8848,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/distsrvrNetworkStats
-    def retrieve_existing_distribution_service_network_statistics(
+    def get_process_distsrvr_network_stats(
         self,
         item,
         version='v2',
@@ -8867,7 +8867,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_distribution_service_network_statistics(
+            client.get_process_distsrvr_network_stats(
                 item='item_example'
             )
         """
@@ -8884,7 +8884,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/distsrvrPathStats
-    def retrieve_existing_distribution_service_path_statistics(
+    def get_process_distsrvr_path_stats(
         self,
         item,
         version='v2',
@@ -8903,7 +8903,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_distribution_service_path_statistics(
+            client.get_process_distsrvr_path_stats(
                 item='item_example'
             )
         """
@@ -8920,7 +8920,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/distsrvrTableStats
-    def retrieve_existing_distribution_service_table_statistics(
+    def get_process_distsrvr_table_stats(
         self,
         item,
         version='v2',
@@ -8939,7 +8939,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_distribution_service_table_statistics(
+            client.get_process_distsrvr_table_stats(
                 item='item_example'
             )
         """
@@ -8956,7 +8956,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/heartbeat
-    def retrieve_existing_heartbeat_timings(
+    def get_process_heartbeat(
         self,
         item,
         version='v2',
@@ -8975,7 +8975,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_heartbeat_timings(
+            client.get_process_heartbeat(
                 item='item_example'
             )
         """
@@ -8992,7 +8992,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/networkStatistics
-    def retrieve_existing_network_statistics(
+    def get_process_network_statistics(
         self,
         item,
         version='v2',
@@ -9011,7 +9011,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_network_statistics(
+            client.get_process_network_statistics(
                 item='item_example'
             )
         """
@@ -9028,7 +9028,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/parallelReplicat
-    def retrieve_existing_parallel_replicat_statistics(
+    def get_process_parallel_replicat(
         self,
         item,
         version='v2',
@@ -9047,7 +9047,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_parallel_replicat_statistics(
+            client.get_process_parallel_replicat(
                 item='item_example'
             )
         """
@@ -9064,7 +9064,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/pmsrvrProcStats
-    def retrieve_existing_performance_metrics_service_monitored_process_statistics(
+    def get_process_pmsrvr_proc_stats(
         self,
         item,
         version='v2',
@@ -9083,7 +9083,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_performance_metrics_service_monitored_process_statistics(
+            client.get_process_pmsrvr_proc_stats(
                 item='item_example'
             )
         """
@@ -9100,7 +9100,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/pmsrvrStats
-    def retrieve_existing_performance_metrics_service_collector_statistics(
+    def get_process_pmsrvr_stats(
         self,
         item,
         version='v2',
@@ -9119,7 +9119,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_performance_metrics_service_collector_statistics(
+            client.get_process_pmsrvr_stats(
                 item='item_example'
             )
         """
@@ -9136,7 +9136,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/pmsrvrWorkerStats
-    def retrieve_existing_performance_metrics_service_worker_thread_statistics(
+    def get_process_pmsrvr_worker_stats(
         self,
         item,
         version='v2',
@@ -9155,7 +9155,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_performance_metrics_service_worker_thread_statistics(
+            client.get_process_pmsrvr_worker_stats(
                 item='item_example'
             )
         """
@@ -9172,7 +9172,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/positionEr
-    def retrieve_existing_checkpoint_position_information(
+    def get_process_position_er(
         self,
         item,
         version='v2',
@@ -9191,7 +9191,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_checkpoint_position_information(
+            client.get_process_position_er(
                 item='item_example'
             )
         """
@@ -9208,7 +9208,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/process
-    def retrieve_existing_process_information_item(
+    def get_process_info(
         self,
         item,
         version='v2',
@@ -9227,7 +9227,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_process_information_item(
+            client.get_process_info(
                 item='item_example'
             )
         """
@@ -9244,7 +9244,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/processPerformance
-    def retrieve_existing_process_performance_resource_utilization_information(
+    def get_process_performance(
         self,
         item,
         version='v2',
@@ -9263,7 +9263,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_process_performance_resource_utilization_information(
+            client.get_process_performance(
                 item='item_example'
             )
         """
@@ -9280,7 +9280,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/queueBucketStatistics
-    def retrieve_existing_queue_bucket_statistics(
+    def get_process_queue_bucket_statistics(
         self,
         item,
         version='v2',
@@ -9299,7 +9299,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_queue_bucket_statistics(
+            client.get_process_queue_bucket_statistics(
                 item='item_example'
             )
         """
@@ -9316,7 +9316,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/queueStatistics
-    def retrieve_existing_queue_statistics(
+    def get_process_queue_statistics(
         self,
         item,
         version='v2',
@@ -9335,7 +9335,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_queue_statistics(
+            client.get_process_queue_statistics(
                 item='item_example'
             )
         """
@@ -9352,7 +9352,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/recvsrvrStats
-    def retrieve_existing_receiver_service_statistics(
+    def get_process_recvsrvr_stats(
         self,
         item,
         version='v2',
@@ -9371,7 +9371,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_receiver_service_statistics(
+            client.get_process_recvsrvr_stats(
                 item='item_example'
             )
         """
@@ -9388,7 +9388,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/serviceHealth
-    def retrieve_existing_service_health(
+    def get_process_service_health(
         self,
         item,
         version='v2',
@@ -9407,7 +9407,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_service_health(
+            client.get_process_service_health(
                 item='item_example'
             )
         """
@@ -9424,7 +9424,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsExtract
-    def retrieve_existing_extract_database_statistics(
+    def get_process_statistics_extract(
         self,
         item,
         version='v2',
@@ -9443,7 +9443,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_extract_database_statistics(
+            client.get_process_statistics_extract(
                 item='item_example'
             )
         """
@@ -9460,7 +9460,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsProcedureExtract
-    def retrieve_existing_extract_database_statistics_by_procedure_feature(
+    def get_process_statistics_procedure_extract(
         self,
         item,
         version='v2',
@@ -9479,7 +9479,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_extract_database_statistics_by_procedure_feature(
+            client.get_process_statistics_procedure_extract(
                 item='item_example'
             )
         """
@@ -9496,7 +9496,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsProcedureReplicat
-    def retrieve_existing_database_statistics_by_procedure_feature(
+    def get_process_statistics_procedure_replicat(
         self,
         item,
         version='v2',
@@ -9515,7 +9515,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_database_statistics_by_procedure_feature(
+            client.get_process_statistics_procedure_replicat(
                 item='item_example'
             )
         """
@@ -9532,7 +9532,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsReplicat
-    def retrieve_existing_replicat_database_statistics(
+    def get_process_statistics_replicat(
         self,
         item,
         version='v2',
@@ -9551,7 +9551,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_replicat_database_statistics(
+            client.get_process_statistics_replicat(
                 item='item_example'
             )
         """
@@ -9568,7 +9568,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsTableExtract
-    def retrieve_existing_extract_database_statistics_by_table(
+    def get_process_statistics_table_extract(
         self,
         item,
         version='v2',
@@ -9587,7 +9587,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_extract_database_statistics_by_table(
+            client.get_process_statistics_table_extract(
                 item='item_example'
             )
         """
@@ -9604,7 +9604,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/statisticsTableReplicat
-    def retrieve_existing_replicat_database_statistics_by_table(
+    def get_process_statistics_table_replicat(
         self,
         item,
         version='v2',
@@ -9623,7 +9623,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_replicat_database_statistics_by_table(
+            client.get_process_statistics_table_replicat(
                 item='item_example'
             )
         """
@@ -9640,7 +9640,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/superpoolStatistics
-    def retrieve_existing_super_pool_statistics(
+    def get_process_superpool_statistics(
         self,
         item,
         version='v2',
@@ -9659,7 +9659,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_super_pool_statistics(
+            client.get_process_superpool_statistics(
                 item='item_example'
             )
         """
@@ -9676,7 +9676,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/threadPerformance
-    def retrieve_existing_process_thread_resource_utilization_information(
+    def get_process_thread_performance(
         self,
         item,
         version='v2',
@@ -9695,7 +9695,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_process_thread_resource_utilization_information(
+            client.get_process_thread_performance(
                 item='item_example'
             )
         """
@@ -9712,7 +9712,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/trailInput
-    def retrieve_existing_input_trail_file_statistics(
+    def get_process_trail_input(
         self,
         item,
         version='v2',
@@ -9731,7 +9731,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_input_trail_file_statistics(
+            client.get_process_trail_input(
                 item='item_example'
             )
         """
@@ -9748,7 +9748,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/mpoints/{item}/trailOutput
-    def retrieve_existing_output_trail_file_statistics(
+    def get_process_trail_output(
         self,
         item,
         version='v2',
@@ -9767,7 +9767,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_output_trail_file_statistics(
+            client.get_process_trail_output(
                 item='item_example'
             )
         """
@@ -9784,7 +9784,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/oggerr
-    def retrieve_list_message_codes(
+    def list_ogg_errors(
         self,
         version='v2',
         ogg_service='',
@@ -9804,7 +9804,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_list_message_codes(
+            client.list_ogg_errors(
                 ogg_service='adminsrvr'
             )
         """
@@ -9820,7 +9820,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/oggerr/{message}
-    def retrieve_message_explanation(
+    def get_ogg_error_info(
         self,
         message,
         version='v2',
@@ -9842,7 +9842,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_message_explanation(
+            client.get_ogg_error_info(
                 message='message_example',
                 ogg_service='adminsrvr'
             )
@@ -9860,7 +9860,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/parameters
-    def list_parameter_names(
+    def list_parameters(
         self,
         version='v2',
         raw_response=False
@@ -9877,7 +9877,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_parameter_names()
+            client.list_parameters()
 
         """
         path_params = {
@@ -9892,7 +9892,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/parameters/{parameter}
-    def retrieve_parameter_info(
+    def get_parameter_info(
         self,
         parameter,
         version='v2',
@@ -9911,7 +9911,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_parameter_info(
+            client.get_parameter_info(
                 parameter='parameter_example'
             )
         """
@@ -9960,7 +9960,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}
-    def retrieve_replicat(
+    def get_replicat(
         self,
         replicat,
         version='v2',
@@ -9981,7 +9981,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_replicat(
+            client.get_replicat(
                 replicat='replicat_example'
             )
         """
@@ -10293,7 +10293,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/command
-    def issue_command_replicat(
+    def execute_command_replicat(
         self,
         replicat,
         data=None,
@@ -10316,7 +10316,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.issue_command_replicat(
+            client.execute_command_replicat(
                 replicat='replicat_example',
                 data={
                     "command": "STATS",
@@ -10338,7 +10338,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info
-    def list_information_types_replicat(
+    def get_replicat_info(
         self,
         replicat,
         version='v2',
@@ -10359,7 +10359,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_information_types_replicat(
+            client.get_replicat_info(
                 replicat='replicat_example'
             )
         """
@@ -10376,7 +10376,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/checkpoints
-    def retrieve_checkpoints_replicat(
+    def get_replicat_checkpoint(
         self,
         replicat,
         version='v2',
@@ -10397,7 +10397,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_checkpoints_replicat(
+            client.get_replicat_checkpoint(
                 replicat='replicat_example'
             )
         """
@@ -10414,7 +10414,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/diagnostics
-    def list_diagnostics_replicat(
+    def list_replicat_diagnostics(
         self,
         replicat,
         version='v2',
@@ -10435,7 +10435,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_diagnostics_replicat(
+            client.list_replicat_diagnostics(
                 replicat='replicat_example'
             )
         """
@@ -10452,10 +10452,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/diagnostics/{diagnostic}
-    def retrieve_diagnostics_replicat(
+    def get_replicat_diagnostic(
         self,
-        diagnostic,
         replicat,
+        diagnostic,
         version='v2',
         raw_response=False
     ):
@@ -10466,25 +10466,25 @@ class OGGRestAPI:
         Retrieve a diagnostics result for the replicat process.
 
         Parameters:
-            diagnostic (str): The name of the diagnostic results, which is the replicat name and
-                '.diagnostics', followed by an optional revision number. Required. Example:
-                diagnostic_example
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
                 alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
+            diagnostic (str): The name of the diagnostic results, which is the replicat name and
+                '.diagnostics', followed by an optional revision number. Required. Example:
+                diagnostic_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_diagnostics_replicat(
-                diagnostic='diagnostic_example',
-                replicat='replicat_example'
+            client.get_replicat_diagnostic(
+                replicat='replicat_example',
+                diagnostic='diagnostic_example'
             )
         """
         path_params = {
-            "diagnostic": diagnostic,
             "replicat": replicat,
+            "diagnostic": diagnostic,
             "version": version,
         }
         return self._call(
@@ -10496,7 +10496,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/history
-    def retrieve_history_replicat(
+    def get_replicat_history(
         self,
         replicat,
         version='v2',
@@ -10517,7 +10517,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_history_replicat(
+            client.get_replicat_history(
                 replicat='replicat_example'
             )
         """
@@ -10534,7 +10534,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/logs
-    def list_logs_replicat(
+    def list_replicat_logs(
         self,
         replicat,
         version='v2',
@@ -10555,7 +10555,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_logs_replicat(
+            client.list_replicat_logs(
                 replicat='replicat_example'
             )
         """
@@ -10572,10 +10572,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/logs/{log}
-    def retrieve_log_replicat(
+    def get_replicat_log(
         self,
-        log,
         replicat,
+        log,
         version='v2',
         raw_response=False
     ):
@@ -10586,24 +10586,24 @@ class OGGRestAPI:
         Retrieve a log from the replicat process.
 
         Parameters:
-            log (str): The name of the log, which is the replicat name, followed by an optional revision
-                number(as -number) and '.log'. Required. Example: log_example
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
                 alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
+            log (str): The name of the log, which is the replicat name, followed by an optional revision
+                number(as -number) and '.log'. Required. Example: log_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_log_replicat(
-                log='log_example',
-                replicat='replicat_example'
+            client.get_replicat_log(
+                replicat='replicat_example',
+                log='log_example'
             )
         """
         path_params = {
-            "log": log,
             "replicat": replicat,
+            "log": log,
             "version": version,
         }
         return self._call(
@@ -10615,7 +10615,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/reports
-    def list_reports_replicat(
+    def list_replicat_reports(
         self,
         replicat,
         version='v2',
@@ -10636,7 +10636,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_reports_replicat(
+            client.list_replicat_reports(
                 replicat='replicat_example'
             )
         """
@@ -10653,10 +10653,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/reports/{report}
-    def retrieve_report_replicat(
+    def get_replicat_report(
         self,
-        report,
         replicat,
+        report,
         version='v2',
         raw_response=False
     ):
@@ -10667,24 +10667,24 @@ class OGGRestAPI:
         Retrieve a report from the replicat process.
 
         Parameters:
-            report (str): The name of the report, which is the replicat name, followed by an optional
-                revision number and '.rpt'. Required. Example: report_example
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
                 alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
+            report (str): The name of the report, which is the replicat name, followed by an optional
+                revision number and '.rpt'. Required. Example: report_example
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_report_replicat(
-                report='report_example',
-                replicat='replicat_example'
+            client.get_replicat_report(
+                replicat='replicat_example',
+                report='report_example'
             )
         """
         path_params = {
-            "report": report,
             "replicat": replicat,
+            "report": report,
             "version": version,
         }
         return self._call(
@@ -10696,7 +10696,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/replicats/{replicat}/info/status
-    def retrieve_status_replicat(
+    def get_replicat_status(
         self,
         replicat,
         version='v2',
@@ -10717,7 +10717,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_status_replicat(
+            client.get_replicat_status(
                 replicat='replicat_example'
             )
         """
@@ -10734,7 +10734,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/requests
-    def retrieve_background_requests(
+    def list_restapi_requests(
         self,
         version='v2',
         ogg_service='',
@@ -10754,7 +10754,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_background_requests(
+            client.list_restapi_requests(
                 ogg_service='adminsrvr'
             )
         """
@@ -10770,7 +10770,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/requests/{request}
-    def retrieve_request_status(
+    def get_restapi_request_status(
         self,
         request,
         version='v2',
@@ -10792,7 +10792,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_request_status(
+            client.get_restapi_request_status(
                 request=1,
                 ogg_service='adminsrvr'
             )
@@ -10810,7 +10810,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/requests/{request}/result
-    def retrieve_request_result(
+    def get_restapi_request_result(
         self,
         request,
         version='v2',
@@ -10832,7 +10832,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_request_result(
+            client.get_restapi_request_result(
                 request=1,
                 ogg_service='adminsrvr'
             )
@@ -10850,7 +10850,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources
-    def get_list_distribution_paths_sources(
+    def list_distribution_paths(
         self,
         version='v2',
         raw_response=False
@@ -10867,7 +10867,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_list_distribution_paths_sources()
+            client.list_distribution_paths()
 
         """
         path_params = {
@@ -10882,7 +10882,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def delete_existing_oracle_goldengate_distribution_path(
+    def get_distribution_paths(
         self,
         distpath,
         version='v2',
@@ -10890,9 +10890,9 @@ class OGGRestAPI:
     ):
         """
         Distribution Service
-        DELETE /services/{version}/sources/{distpath}
-        Required Role: Administrator
-        Delete an existing Oracle GoldenGate Distribution Path
+        GET /services/{version}/sources/{distpath}
+        Required Role: User
+        Retrieve an existing Oracle GoldenGate Distribution Path
 
         Parameters:
             distpath (str): Required. Example: distpath_example
@@ -10901,7 +10901,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.delete_existing_oracle_goldengate_distribution_path(
+            client.get_distribution_paths(
                 distpath='distpath_example'
             )
         """
@@ -10910,7 +10910,7 @@ class OGGRestAPI:
             "version": version,
         }
         return self._call(
-            "DELETE",
+            "GET",
             "/services/{version}/sources/{distpath}",
             path_params=path_params,
             ogg_service="distsrvr",
@@ -10918,7 +10918,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def create_new_oracle_goldengate_distribution_path(
+    def create_distribution_paths(
         self,
         distpath,
         begin=None,
@@ -10966,7 +10966,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.create_new_oracle_goldengate_distribution_path(
+            client.create_distribution_paths(
                 distpath='distpath_example',
                 data={
                     "$schema": "ogg:distPath",
@@ -10986,7 +10986,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.create_new_oracle_goldengate_distribution_path(
+            client.create_distribution_paths(
                 distpath='distpath_example',
                 begin={
                     "sequence": "0",
@@ -11056,7 +11056,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def update_existing_distribution_path(
+    def update_distribution_paths(
         self,
         distpath,
         begin=None,
@@ -11102,7 +11102,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_existing_distribution_path(
+            client.update_distribution_paths(
                 distpath='distpath_example',
                 data={
                     "$schema": "ogg:distPath",
@@ -11110,7 +11110,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.update_existing_distribution_path(
+            client.update_distribution_paths(
                 distpath='distpath_example',
                 begin=None,
                 name=None,
@@ -11196,7 +11196,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def retrieve_existing_oracle_goldengate_distribution_path(
+    def delete_distribution_paths(
         self,
         distpath,
         version='v2',
@@ -11204,9 +11204,9 @@ class OGGRestAPI:
     ):
         """
         Distribution Service
-        GET /services/{version}/sources/{distpath}
-        Required Role: User
-        Retrieve an existing Oracle GoldenGate Distribution Path
+        DELETE /services/{version}/sources/{distpath}
+        Required Role: Administrator
+        Delete an existing Oracle GoldenGate Distribution Path
 
         Parameters:
             distpath (str): Required. Example: distpath_example
@@ -11215,7 +11215,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_oracle_goldengate_distribution_path(
+            client.delete_distribution_paths(
                 distpath='distpath_example'
             )
         """
@@ -11224,7 +11224,7 @@ class OGGRestAPI:
             "version": version,
         }
         return self._call(
-            "GET",
+            "DELETE",
             "/services/{version}/sources/{distpath}",
             path_params=path_params,
             ogg_service="distsrvr",
@@ -11232,7 +11232,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}/checkpoints
-    def retrieve_existing_oracle_goldengate_distribution_path_checkpoints(
+    def get_distribution_path_checkpoint(
         self,
         distpath,
         version='v2',
@@ -11251,7 +11251,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_oracle_goldengate_distribution_path_checkpoints(
+            client.get_distribution_path_checkpoint(
                 distpath='distpath_example'
             )
         """
@@ -11268,7 +11268,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}/info
-    def retrieve_existing_oracle_goldengate_distribution_path_information(
+    def get_distribution_path_info(
         self,
         distpath,
         version='v2',
@@ -11287,7 +11287,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_oracle_goldengate_distribution_path_information(
+            client.get_distribution_path_info(
                 distpath='distpath_example'
             )
         """
@@ -11304,7 +11304,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}/stats
-    def retrieve_existing_oracle_goldengate_distribution_path_statistics(
+    def get_distribution_path_stats(
         self,
         distpath,
         version='v2',
@@ -11323,7 +11323,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_oracle_goldengate_distribution_path_statistics(
+            client.get_distribution_path_stats(
                 distpath='distpath_example'
             )
         """
@@ -11340,7 +11340,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/stream
-    def get_list_data_stream_resources(
+    def list_data_streams(
         self,
         version='v2',
         raw_response=False
@@ -11357,7 +11357,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_list_data_stream_resources()
+            client.list_data_streams()
 
         """
         path_params = {
@@ -11372,7 +11372,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/stream/{streamName}
-    def delete_existing_oracle_goldengate_data_stream_configuration(
+    def get_data_stream(
         self,
         streamName,
         version='v2',
@@ -11380,9 +11380,9 @@ class OGGRestAPI:
     ):
         """
         Distribution Service
-        DELETE /services/{version}/stream/{streamName}
-        Required Role: Administrator
-        Delete an existing Oracle GoldenGate Data Stream configuration
+        GET /services/{version}/stream/{streamName}
+        Required Role: Operator
+        Retrieve an existing Oracle GoldenGate Data Stream configuration
 
         Parameters:
             streamName (str): Required. Example: streamName_example
@@ -11391,7 +11391,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.delete_existing_oracle_goldengate_data_stream_configuration(
+            client.get_data_stream(
                 streamName='streamName_example'
             )
         """
@@ -11400,7 +11400,7 @@ class OGGRestAPI:
             "version": version,
         }
         return self._call(
-            "DELETE",
+            "GET",
             "/services/{version}/stream/{streamName}",
             path_params=path_params,
             ogg_service="distsrvr",
@@ -11408,7 +11408,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/stream/{streamName}
-    def create_new_oracle_goldengate_data_stream_configuration(
+    def create_data_stream(
         self,
         streamName,
         tcpKeepAliveTimeout=None,
@@ -11453,7 +11453,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.create_new_oracle_goldengate_data_stream_configuration(
+            client.create_data_stream(
                 streamName='streamName_example',
                 data={
                     "source": "trail://localhost:9012/services/v2/sources?trail=a1",
@@ -11462,7 +11462,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.create_new_oracle_goldengate_data_stream_configuration(
+            client.create_data_stream(
                 streamName='streamName_example',
                 tcpKeepAliveTimeout=None,
                 qualityOfService=None,
@@ -11505,7 +11505,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/stream/{streamName}
-    def update_existing_oracle_goldengate_data_stream_configuration(
+    def update_data_stream(
         self,
         streamName,
         tcpKeepAliveTimeout=None,
@@ -11547,7 +11547,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_existing_oracle_goldengate_data_stream_configuration(
+            client.update_data_stream(
                 streamName='streamName_example',
                 data={
                     "source": "trail://localhost:9012/services/v2/sources?trail=a1",
@@ -11556,7 +11556,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.update_existing_oracle_goldengate_data_stream_configuration(
+            client.update_data_stream(
                 streamName='streamName_example',
                 tcpKeepAliveTimeout=None,
                 qualityOfService=None,
@@ -11598,7 +11598,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/stream/{streamName}
-    def retrieve_existing_oracle_goldengate_data_stream_configuration(
+    def delete_data_stream(
         self,
         streamName,
         version='v2',
@@ -11606,9 +11606,9 @@ class OGGRestAPI:
     ):
         """
         Distribution Service
-        GET /services/{version}/stream/{streamName}
-        Required Role: Operator
-        Retrieve an existing Oracle GoldenGate Data Stream configuration
+        DELETE /services/{version}/stream/{streamName}
+        Required Role: Administrator
+        Delete an existing Oracle GoldenGate Data Stream configuration
 
         Parameters:
             streamName (str): Required. Example: streamName_example
@@ -11617,7 +11617,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_oracle_goldengate_data_stream_configuration(
+            client.delete_data_stream(
                 streamName='streamName_example'
             )
         """
@@ -11626,7 +11626,7 @@ class OGGRestAPI:
             "version": version,
         }
         return self._call(
-            "GET",
+            "DELETE",
             "/services/{version}/stream/{streamName}",
             path_params=path_params,
             ogg_service="distsrvr",
@@ -11634,7 +11634,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/stream/{streamName}/info
-    def retrieve_existing_oracle_goldengate_data_stream_information(
+    def get_data_stream_info(
         self,
         streamName,
         version='v2',
@@ -11653,7 +11653,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_oracle_goldengate_data_stream_information(
+            client.get_data_stream_info(
                 streamName='streamName_example'
             )
         """
@@ -11670,7 +11670,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/stream/{streamName}/info/errors
-    def retrieve_data_stream_service_error_messages_if_applicable(
+    def list_data_stream_errors(
         self,
         streamName,
         version='v2',
@@ -11689,7 +11689,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_data_stream_service_error_messages_if_applicable(
+            client.list_data_stream_errors(
                 streamName='streamName_example'
             )
         """
@@ -11705,7 +11705,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/stream/{streamName}/yaml
-    def retrieve_asyncapi_yaml_specification(
+    def get_data_stream_yaml(
         self,
         streamName,
         version='v2',
@@ -11724,7 +11724,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_asyncapi_yaml_specification(
+            client.get_data_stream_yaml(
                 streamName='streamName_example'
             )
         """
@@ -11741,7 +11741,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/stream/{streamName}/yaml
-    def update_asyncapi_yaml_specification(
+    def update_data_stream_yaml(
         self,
         streamName,
         data=None,
@@ -11762,7 +11762,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_asyncapi_yaml_specification(
+            client.update_data_stream_yaml(
                 streamName='streamName_example',
                 data={})
         """
@@ -11780,7 +11780,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets
-    def get_list_distribution_paths_targets(
+    def list_receiver_paths(
         self,
         version='v2',
         raw_response=False
@@ -11797,7 +11797,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_list_distribution_paths_targets()
+            client.list_receiver_paths()
 
         """
         path_params = {
@@ -11812,7 +11812,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def delete_existing_oracle_goldengate_collector_path(
+    def get_receiver_paths(
         self,
         path,
         version='v2',
@@ -11820,9 +11820,9 @@ class OGGRestAPI:
     ):
         """
         Receiver Service
-        DELETE /services/{version}/targets/{path}
-        Required Role: Administrator
-        Delete an existing Oracle GoldenGate Collector Path
+        GET /services/{version}/targets/{path}
+        Required Role: User
+        Retrieve an existing Oracle GoldenGate Collector Path
 
         Parameters:
             path (str): Required. Example: path_example
@@ -11831,7 +11831,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.delete_existing_oracle_goldengate_collector_path(
+            client.get_receiver_paths(
                 path='path_example'
             )
         """
@@ -11840,7 +11840,7 @@ class OGGRestAPI:
             "version": version,
         }
         return self._call(
-            "DELETE",
+            "GET",
             "/services/{version}/targets/{path}",
             path_params=path_params,
             ogg_service="recvsrvr",
@@ -11848,7 +11848,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def create_new_oracle_goldengate_collector_path(
+    def create_receiver_paths(
         self,
         path,
         begin=None,
@@ -11896,7 +11896,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.create_new_oracle_goldengate_collector_path(
+            client.create_receiver_paths(
                 path='path_example',
                 data={
                     "$schema": "ogg:distPath",
@@ -11916,7 +11916,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.create_new_oracle_goldengate_collector_path(
+            client.create_receiver_paths(
                 path='path_example',
                 begin={
                     "sequence": "0",
@@ -11986,7 +11986,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def update_existing_oracle_goldengate_collector_path(
+    def update_receiver_paths(
         self,
         path,
         begin=None,
@@ -12031,7 +12031,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_existing_oracle_goldengate_collector_path(
+            client.update_receiver_paths(
                 path='path_example',
                 data={
                     "options": {
@@ -12045,7 +12045,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.update_existing_oracle_goldengate_collector_path(
+            client.update_receiver_paths(
                 path='path_example',
                 begin=None,
                 name=None,
@@ -12116,7 +12116,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def retrieve_existing_oracle_goldengate_collector_path(
+    def delete_receiver_paths(
         self,
         path,
         version='v2',
@@ -12124,9 +12124,9 @@ class OGGRestAPI:
     ):
         """
         Receiver Service
-        GET /services/{version}/targets/{path}
-        Required Role: User
-        Retrieve an existing Oracle GoldenGate Collector Path
+        DELETE /services/{version}/targets/{path}
+        Required Role: Administrator
+        Delete an existing Oracle GoldenGate Collector Path
 
         Parameters:
             path (str): Required. Example: path_example
@@ -12135,7 +12135,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_oracle_goldengate_collector_path(
+            client.delete_receiver_paths(
                 path='path_example'
             )
         """
@@ -12144,7 +12144,7 @@ class OGGRestAPI:
             "version": version,
         }
         return self._call(
-            "GET",
+            "DELETE",
             "/services/{version}/targets/{path}",
             path_params=path_params,
             ogg_service="recvsrvr",
@@ -12152,7 +12152,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}/checkpoints
-    def retrieve_existing_oracle_goldengate_receiver_service_path_checkpoints(
+    def get_receiver_path_checkpoint(
         self,
         path,
         version='v2',
@@ -12171,7 +12171,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_oracle_goldengate_receiver_service_path_checkpoints(
+            client.get_receiver_path_checkpoint(
                 path='path_example'
             )
         """
@@ -12188,7 +12188,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}/info
-    def retrieve_existing_oracle_goldengate_receiver_service_path_information(
+    def get_receiver_path_info(
         self,
         path,
         version='v2',
@@ -12207,7 +12207,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_oracle_goldengate_receiver_service_path_information(
+            client.get_receiver_path_info(
                 path='path_example'
             )
         """
@@ -12224,7 +12224,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}/progress
-    def retrieve_existing_oracle_goldengate_receiver_service_progress(
+    def get_receiver_path_progress(
         self,
         path,
         version='v2',
@@ -12243,7 +12243,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_oracle_goldengate_receiver_service_progress(
+            client.get_receiver_path_progress(
                 path='path_example'
             )
         """
@@ -12260,7 +12260,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}/stats
-    def retrieve_existing_oracle_goldengate_receiver_service_path_stats(
+    def get_receiver_path_stats(
         self,
         path,
         version='v2',
@@ -12279,7 +12279,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_existing_oracle_goldengate_receiver_service_path_stats(
+            client.get_receiver_path_stats(
                 path='path_example'
             )
         """
@@ -12328,7 +12328,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/tasks/{task}
-    def retrieve_task(
+    def get_task(
         self,
         task,
         version='v2',
@@ -12348,7 +12348,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_task(
+            client.get_task(
                 task='task_example'
             )
         """
@@ -12629,7 +12629,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/tasks/{task}/info
-    def list_information_types_task(
+    def list_task_info_types(
         self,
         task,
         version='v2',
@@ -12649,7 +12649,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.list_information_types_task(
+            client.list_task_info_types(
                 task='task_example'
             )
         """
@@ -12666,7 +12666,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/tasks/{task}/info/history
-    def retrieve_task_history(
+    def get_task_history(
         self,
         task,
         version='v2',
@@ -12686,7 +12686,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_task_history(
+            client.get_task_history(
                 task='task_example'
             )
         """
@@ -12703,7 +12703,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/tasks/{task}/info/status
-    def retrieve_task_status(
+    def get_task_status(
         self,
         task,
         version='v2',
@@ -12723,7 +12723,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_task_status(
+            client.get_task_status(
                 task='task_example'
             )
         """
@@ -12772,7 +12772,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/trails/{trail}
-    def retrieve_trail(
+    def get_trail(
         self,
         trail,
         version='v2',
@@ -12801,7 +12801,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.retrieve_trail(
+            client.get_trail(
                 trail='trail_example'
             )
         """
@@ -13249,10 +13249,10 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/trails/{trail}/sequences/{sequence}
-    def retrieve_trail_sequence(
+    def get_trail_sequence(
         self,
-        sequence,
         trail,
+        sequence,
         version='v2',
         raw_response=False
     ):
@@ -13263,7 +13263,6 @@ class OGGRestAPI:
         Retrieve a trail sequence
 
         Parameters:
-            sequence (int): The trail sequence number. Required. Example: 1
             trail (str): The name of the Trail. This corresponds to the trailName property in the ogg:trail
                 resource or the trail filesystem path.
                 A trail name can be either a human-friendly name like HumanResources or a two-character name
@@ -13275,19 +13274,20 @@ class OGGRestAPI:
                 either HumanResources or ea?path=north%2Femployees, but the canonical name is always the
                 human-friendly name.
                 POST operations accept only the human-friendly name. Required. Example: trail_example
+            sequence (int): The trail sequence number. Required. Example: 1
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.retrieve_trail_sequence(
-                sequence=1,
-                trail='trail_example'
+            client.get_trail_sequence(
+                trail='trail_example',
+                sequence=1
             )
         """
         path_params = {
-            "sequence": sequence,
             "trail": trail,
+            "sequence": sequence,
             "version": version,
         }
         return self._call(
@@ -13301,8 +13301,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/trails/{trail}/sequences/{sequence}
     def create_trail_sequence(
         self,
-        sequence,
         trail,
+        sequence,
         data=None,
         version='v2',
         raw_response=False,
@@ -13315,7 +13315,6 @@ class OGGRestAPI:
         Create a new trail sequence in a trail by uploading file content
 
         Parameters:
-            sequence (int): The trail sequence number. Required. Example: 1
             trail (str): The name of the Trail. This corresponds to the trailName property in the ogg:trail
                 resource or the trail filesystem path.
                 A trail name can be either a human-friendly name like HumanResources or a two-character name
@@ -13327,6 +13326,7 @@ class OGGRestAPI:
                 either HumanResources or ea?path=north%2Femployees, but the canonical name is always the
                 human-friendly name.
                 POST operations accept only the human-friendly name. Required. Example: trail_example
+            sequence (int): The trail sequence number. Required. Example: 1
             data (dict): Data payload. See call example below for more details.
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -13336,13 +13336,13 @@ class OGGRestAPI:
 
         Example:
             client.create_trail_sequence(
-                sequence=1,
                 trail='trail_example',
+                sequence=1,
                 data={})
         """
         path_params = {
-            "sequence": sequence,
             "trail": trail,
+            "sequence": sequence,
             "version": version,
         }
         return self._call(
@@ -13358,8 +13358,8 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/trails/{trail}/sequences/{sequence}
     def delete_trail_sequence(
         self,
-        sequence,
         trail,
+        sequence,
         version='v2',
         raw_response=False
     ):
@@ -13370,7 +13370,6 @@ class OGGRestAPI:
         Delete a trail sequence from a trail
 
         Parameters:
-            sequence (int): The trail sequence number. Required. Example: 1
             trail (str): The name of the Trail. This corresponds to the trailName property in the ogg:trail
                 resource or the trail filesystem path.
                 A trail name can be either a human-friendly name like HumanResources or a two-character name
@@ -13382,19 +13381,20 @@ class OGGRestAPI:
                 either HumanResources or ea?path=north%2Femployees, but the canonical name is always the
                 human-friendly name.
                 POST operations accept only the human-friendly name. Required. Example: trail_example
+            sequence (int): The trail sequence number. Required. Example: 1
             version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.delete_trail_sequence(
-                sequence=1,
-                trail='trail_example'
+                trail='trail_example',
+                sequence=1
             )
         """
         path_params = {
-            "sequence": sequence,
             "trail": trail,
+            "sequence": sequence,
             "version": version,
         }
         return self._call(
