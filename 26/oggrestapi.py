@@ -2257,7 +2257,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/tables/checkpoint
-    def update_checkpoint_table(
+    def manage_checkpoint_table(
         self,
         connection,
         operation=None,
@@ -2287,7 +2287,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.update_checkpoint_table(
+            client.manage_checkpoint_table(
                 connection='MYCONN',
                 data={
                     "operation": "add",
@@ -2295,7 +2295,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.update_checkpoint_table(
+            client.manage_checkpoint_table(
                 connection='MYCONN',
                 operation='add',
                 name='ggadmin.ggs_checkpoint'
@@ -2697,7 +2697,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/trandata/procedure
-    def update_procedural_supplemental_logging(
+    def manage_procedure_supplemental_logging(
         self,
         connection,
         operation=None,
@@ -2722,14 +2722,14 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_procedural_supplemental_logging(
+            client.manage_procedure_supplemental_logging(
                 connection='MYCONN',
                 data={
                     "operation": "info"
                 }
             )
 
-            client.update_procedural_supplemental_logging(
+            client.manage_procedure_supplemental_logging(
                 connection='MYCONN',
                 operation='info'
             )
@@ -2751,7 +2751,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/trandata/schema
-    def update_schema_supplemental_logging(
+    def manage_schema_supplemental_logging(
         self,
         connection,
         data=None,
@@ -2773,7 +2773,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_schema_supplemental_logging(
+            client.manage_schema_supplemental_logging(
                 connection='MYCONN',
                 data={
                     "operation": "info",
@@ -2795,7 +2795,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/connections/{connection}/trandata/table
-    def update_table_supplemental_logging(
+    def manage_table_supplemental_logging(
         self,
         connection,
         data=None,
@@ -2817,7 +2817,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_table_supplemental_logging(
+            client.manage_table_supplemental_logging(
                 connection='MYCONN',
                 data={
                     "$schema": "ogg:trandataTable",
@@ -11745,7 +11745,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def get_distribution_paths(
+    def get_distribution_path(
         self,
         distpath,
         version='v2',
@@ -11764,7 +11764,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_distribution_paths(
+            client.get_distribution_path(
                 distpath='distpath_example'
             )
         """
@@ -11781,7 +11781,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def create_distribution_paths(
+    def create_distribution_path(
         self,
         distpath,
         begin=None,
@@ -11829,7 +11829,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.create_distribution_paths(
+            client.create_distribution_path(
                 distpath='distpath_example',
                 data={
                     "$schema": "ogg:distPath",
@@ -11852,7 +11852,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.create_distribution_paths(
+            client.create_distribution_path(
                 distpath='distpath_example',
                 begin={
                     "sequence": "0",
@@ -11925,7 +11925,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def update_distribution_paths(
+    def update_distribution_path(
         self,
         distpath,
         begin=None,
@@ -11971,7 +11971,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_distribution_paths(
+            client.update_distribution_path(
                 distpath='distpath_example',
                 data={
                     "$schema": "ogg:distPath",
@@ -11979,7 +11979,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.update_distribution_paths(
+            client.update_distribution_path(
                 distpath='distpath_example',
                 begin=None,
                 name=None,
@@ -12065,7 +12065,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/sources/{distpath}
-    def delete_distribution_paths(
+    def delete_distribution_path(
         self,
         distpath,
         version='v2',
@@ -12084,7 +12084,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.delete_distribution_paths(
+            client.delete_distribution_path(
                 distpath='distpath_example'
             )
         """
@@ -12681,7 +12681,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def get_receiver_paths(
+    def get_receiver_path(
         self,
         path,
         version='v2',
@@ -12700,7 +12700,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.get_receiver_paths(
+            client.get_receiver_path(
                 path='path_example'
             )
         """
@@ -12717,7 +12717,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def create_receiver_paths(
+    def create_receiver_path(
         self,
         path,
         begin=None,
@@ -12765,7 +12765,7 @@ class OGGRestAPI:
                 if_exists_example
 
         Example:
-            client.create_receiver_paths(
+            client.create_receiver_path(
                 path='path_example',
                 data={
                     "$schema": "ogg:distPath",
@@ -12788,7 +12788,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.create_receiver_paths(
+            client.create_receiver_path(
                 path='path_example',
                 begin={
                     "sequence": "0",
@@ -12861,7 +12861,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def update_receiver_paths(
+    def update_receiver_path(
         self,
         path,
         begin=None,
@@ -12906,7 +12906,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.update_receiver_paths(
+            client.update_receiver_path(
                 path='path_example',
                 data={
                     "options": {
@@ -12920,7 +12920,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.update_receiver_paths(
+            client.update_receiver_path(
                 path='path_example',
                 begin=None,
                 name=None,
@@ -12991,7 +12991,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/targets/{path}
-    def delete_receiver_paths(
+    def delete_receiver_path(
         self,
         path,
         version='v2',
@@ -13010,7 +13010,7 @@ class OGGRestAPI:
                 _extract_main().
 
         Example:
-            client.delete_receiver_paths(
+            client.delete_receiver_path(
                 path='path_example'
             )
         """
@@ -14335,7 +14335,7 @@ class OGGRestAPI:
         )
 
     def start_distribution_path(self, distpath, version='v2', raw_response=False):
-        return self.update_existing_distribution_path(
+        return self.update_distribution_path(
             distpath,
             data={'status': 'running'},
             version=version,
@@ -14343,7 +14343,7 @@ class OGGRestAPI:
         )
 
     def stop_distribution_path(self, distpath, version='v2', raw_response=False):
-        return self.update_existing_distribution_path(
+        return self.update_distribution_path(
             distpath,
             data={'status': 'stopped'},
             version=version,
@@ -14351,7 +14351,7 @@ class OGGRestAPI:
         )
 
     def start_service(self, service, deployment, version='v2', raw_response=False):
-        return self.update_service_properties(
+        return self.update_service(
             service,
             deployment,
             data={'status': 'running'},
@@ -14360,7 +14360,7 @@ class OGGRestAPI:
         )
 
     def stop_service(self, service, deployment, version='v2', raw_response=False):
-        return self.update_service_properties(
+        return self.update_service(
             service,
             deployment,
             data={'status': 'stopped'},
