@@ -4,14 +4,18 @@ Oracle GoldenGate REST API Client
 Author: Julien DELATTRE
 """
 
+import getpass
 import requests
+import time
 import urllib3
 from pprint import pprint
 
 
 class OGGRestAPI:
+    """Oracle GoldenGate REST API client."""
+
     def __init__(self, url, username=None, password=None, deployment=None, ca_cert=None,
-                 reverse_proxy=False, verify_ssl=True, test_connection=True, timeout=None):
+                 reverse_proxy=False, verify_ssl=True, test_connection=True, timeout=None, version='v2'):
         """
         Initialize Oracle GoldenGate REST API client.
 
@@ -28,6 +32,7 @@ class OGGRestAPI:
         :param timeout: request timeout in seconds
         """
         self.swagger_version = '2023.12.12'
+        self.version = version
         self.base_url = url
         self.username = username
         self.auth = (self.username, password)
@@ -37,7 +42,6 @@ class OGGRestAPI:
         self.verify_ssl = ca_cert if ca_cert else verify_ssl
         self.timeout = timeout
         self.session = requests.Session()
-        self.session.auth = self.auth
         self.session.headers.update(self.headers)
 
         if not verify_ssl and self.base_url.startswith('https://'):
@@ -46,12 +50,22 @@ class OGGRestAPI:
 
         # Test connection
         if test_connection:
-            try:
-                self.list_api_versions()
+            # Testing connection by listing roles, which is a simple authenticated GET request that
+            # works on all versions of the API. If this fails, it will raise an exception that can
+            # be caught by the caller to handle connection issues gracefully.
+            resp = self.list_roles(raw_response=True)
+            if resp.status_code == 200:
                 print(f'Connected to OGG REST API at {self.base_url}')
-            except Exception as e:
-                print(f'Error connecting to OGG REST API: {e}')
-                raise
+            elif resp.status_code == 403:
+                print(
+                    f"Authentication failed when connecting to OGG REST API at {self.base_url}. "
+                    "Please check your credentials."
+                )
+                raise RuntimeError(
+                    f"Authentication failed with user {self.username}. Please check your credentials.")
+            else:
+                print(f"Failed to connect to OGG REST API at {self.base_url}. HTTP {resp.status_code}: {resp.text}")
+                raise RuntimeError(f"Connection failed with status code {resp.status_code}")
 
     def _request(self, method, path, *, params=None, data=None, raw_response=False):
         url = f'{self.base_url}{path}'
@@ -74,7 +88,10 @@ class OGGRestAPI:
             return self._extract_main(result)
 
     def _build_path(self, template, ogg_service=None, path_params=None):
-        path_params = path_params or {}
+        path_params = dict(path_params or {})
+        if "{version}" in template and "version" not in path_params:
+            path_params["version"] = self.version
+
         # If reverse proxy is enabled, the full service must be added before /v2/
         #   - /services/ServiceManager/v2/... for Service Manager
         #   - /services/deployment_name/ogg_service/v2/... for other services when a deployment is specified
@@ -167,12 +184,14 @@ class OGGRestAPI:
             try:
                 if 'messages' in response.json():
                     messages = response.json().get('messages', [])
-                    raise Exception(
-                        ' ; '.join([f"{message['severity']} (code {response.status_code}) - {url}: {message['title']}" for message in messages])
-                    )
-                else:
-                    print(f'HTTP {response.status_code}: {response.text}')
-                    response.raise_for_status()
+                    error_messages = [
+                        f"{message['severity']} (code {response.status_code}) - "
+                        f"{url}: {message['title']}"
+                        for message in messages
+                    ]
+                    raise RuntimeError(' ; '.join(error_messages))
+                print(f'HTTP {response.status_code}: {response.text}')
+                response.raise_for_status()
             except ValueError:
                 print(f'HTTP {response.status_code}: {response.text}')
                 response.raise_for_status()
@@ -223,12 +242,16 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        return self._call("GET", "/services", raw_response=raw_response)
+        return self._call(
+            method="GET",
+            template="/services",
+            ogg_service=ogg_service,
+            raw_response=raw_response
+        )
 
     # Endpoint: /services/{version}
     def get_api_version(
         self,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -238,7 +261,6 @@ class OGGRestAPI:
         Use this endpoint to obtain details of a specific version of an Oracle GoldenGate Service REST API.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -249,13 +271,9 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}",
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -263,7 +281,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/authorizations
     def list_roles(
         self,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -273,7 +290,6 @@ class OGGRestAPI:
         Get the collection of roles in this deployment.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -284,13 +300,9 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/authorizations",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/authorizations",
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -299,7 +311,6 @@ class OGGRestAPI:
     def list_users(
         self,
         role,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -310,7 +321,6 @@ class OGGRestAPI:
 
         Parameters:
             role (str): Authorization Role Resource Name. Required. Example: User
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -322,14 +332,12 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "role": role,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/authorizations/{role}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/authorizations/{role}",
+            path_params={
+                "role": role,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -340,7 +348,6 @@ class OGGRestAPI:
         role,
         users=None,
         data=None,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -354,7 +361,6 @@ class OGGRestAPI:
             users (list): Required if not included in `data`. Example: users_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -393,14 +399,12 @@ class OGGRestAPI:
                 ]
             )
         """
-        path_params = {
-            "role": role,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/authorizations/{role}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/authorizations/{role}",
+            path_params={
+                "role": role,
+            },
             data=data,
             body_params={
                 "users": users,
@@ -414,7 +418,6 @@ class OGGRestAPI:
         self,
         role,
         user,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -426,7 +429,6 @@ class OGGRestAPI:
         Parameters:
             role (str): Authorization Role Resource Name. Required. Example: User
             user (str): User Resource Name. Required. Example: user_example
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -439,15 +441,13 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "role": role,
-            "user": user,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/authorizations/{role}/{user}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/authorizations/{role}/{user}",
+            path_params={
+                "role": role,
+                "user": user,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -463,7 +463,6 @@ class OGGRestAPI:
         info=None,
         type=None,
         data=None,
-        version='v2',
         ogg_service='',
         raw_response=False,
         if_exists='fail'
@@ -476,14 +475,13 @@ class OGGRestAPI:
         Parameters:
             role (str): Authorization Role Resource Name. Required. Example: User
             user (str): User Resource Name. Required. Example: user_example
-            role (str):  Example: role_example
-            user (str):  Example: user_example
+            role_1 (str):  Example: role_example
+            user_1 (str):  Example: user_example
             credential (str):  Example: credential_example
             info (str):  Example: info_example
             type (str):  Example: type_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -513,15 +511,13 @@ class OGGRestAPI:
                 type=None
             )
         """
-        path_params = {
-            "role": role,
-            "user": user,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/authorizations/{role}/{user}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/authorizations/{role}/{user}",
+            path_params={
+                "role": role,
+                "user": user,
+            },
             data=data,
             body_params={
                 "role": role_1,
@@ -546,7 +542,6 @@ class OGGRestAPI:
         info=None,
         type=None,
         data=None,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -558,14 +553,13 @@ class OGGRestAPI:
         Parameters:
             role (str): Authorization Role Resource Name. Required. Example: User
             user (str): User Resource Name. Required. Example: user_example
-            role (str):  Example: role_example
-            user (str):  Example: user_example
+            role_1 (str):  Example: role_example
+            user_1 (str):  Example: user_example
             credential (str):  Example: credential_example
             info (str):  Example: info_example
             type (str):  Example: type_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -592,15 +586,13 @@ class OGGRestAPI:
                 type=None
             )
         """
-        path_params = {
-            "role": role,
-            "user": user,
-            "version": version,
-        }
         return self._call(
-            "PATCH",
-            "/services/{version}/authorizations/{role}/{user}",
-            path_params=path_params,
+            method="PATCH",
+            template="/services/{version}/authorizations/{role}/{user}",
+            path_params={
+                "role": role,
+                "user": user,
+            },
             data=data,
             body_params={
                 "role": role_1,
@@ -618,7 +610,6 @@ class OGGRestAPI:
         self,
         role,
         user,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -631,7 +622,6 @@ class OGGRestAPI:
         Parameters:
             role (str): Authorization Role Resource Name. Required. Example: User
             user (str): User Resource Name. Required. Example: user_example
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -644,15 +634,13 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "role": role,
-            "user": user,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/authorizations/{role}/{user}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/authorizations/{role}/{user}",
+            path_params={
+                "role": role,
+                "user": user,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -661,7 +649,6 @@ class OGGRestAPI:
     def execute_command(
         self,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -672,7 +659,6 @@ class OGGRestAPI:
 
         Parameters:
             data (dict): Data payload. See call example below for more details.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -696,13 +682,9 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/commands/execute",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/commands/execute",
             data=data,
             raw_response=raw_response
         )
@@ -710,7 +692,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/config/files
     def list_configuration_files(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -719,7 +700,6 @@ class OGGRestAPI:
         Retrieve the collection of configuration files.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -727,13 +707,9 @@ class OGGRestAPI:
             client.list_configuration_files()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/config/files",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/config/files",
             raw_response=raw_response
         )
 
@@ -741,7 +717,6 @@ class OGGRestAPI:
     def get_configuration_file(
         self,
         file,
-        version='v2',
         raw_response=False
     ):
         """
@@ -751,7 +726,6 @@ class OGGRestAPI:
 
         Parameters:
             file (str): The name of a configuration file. Required. Example: file_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -760,14 +734,12 @@ class OGGRestAPI:
                 file='file_example'
             )
         """
-        path_params = {
-            "file": file,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/config/files/{file}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/config/files/{file}",
+            path_params={
+                "file": file,
+            },
             raw_response=raw_response
         )
 
@@ -777,7 +749,6 @@ class OGGRestAPI:
         file,
         lines=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -791,7 +762,6 @@ class OGGRestAPI:
             lines (list): Required if not included in `data`. Example: lines_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -816,14 +786,12 @@ class OGGRestAPI:
                 ]
             )
         """
-        path_params = {
-            "file": file,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/config/files/{file}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/config/files/{file}",
+            path_params={
+                "file": file,
+            },
             data=data,
             body_params={
                 "lines": lines,
@@ -836,7 +804,6 @@ class OGGRestAPI:
     def delete_configuration_file(
         self,
         file,
-        version='v2',
         raw_response=False
     ):
         """
@@ -846,7 +813,6 @@ class OGGRestAPI:
 
         Parameters:
             file (str): The name of a configuration file. Required. Example: file_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -855,14 +821,12 @@ class OGGRestAPI:
                 file='file_example'
             )
         """
-        path_params = {
-            "file": file,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/config/files/{file}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/config/files/{file}",
+            path_params={
+                "file": file,
+            },
             raw_response=raw_response
         )
 
@@ -872,7 +836,6 @@ class OGGRestAPI:
         file,
         lines=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -885,7 +848,6 @@ class OGGRestAPI:
             lines (list): Required if not included in `data`. Example: lines_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -908,14 +870,12 @@ class OGGRestAPI:
                 ]
             )
         """
-        path_params = {
-            "file": file,
-            "version": version,
-        }
         return self._call(
-            "PUT",
-            "/services/{version}/config/files/{file}",
-            path_params=path_params,
+            method="PUT",
+            template="/services/{version}/config/files/{file}",
+            path_params={
+                "file": file,
+            },
             data=data,
             body_params={
                 "lines": lines,
@@ -926,7 +886,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/config/health
     def get_service_health(
         self,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -936,7 +895,6 @@ class OGGRestAPI:
         Retrieve detailed information for the service health.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -947,13 +905,9 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/config/health",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/config/health",
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -961,7 +915,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/config/health/check
     def get_service_health_check(
         self,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -971,7 +924,6 @@ class OGGRestAPI:
         Retrieve summary information for the service health.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -982,13 +934,9 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/config/health/check",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/config/health/check",
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -996,7 +944,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/config/summary
     def get_config_summary(
         self,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -1006,7 +953,6 @@ class OGGRestAPI:
         Retrieve summary information for the service.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -1017,13 +963,9 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/config/summary",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/config/summary",
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -1031,7 +973,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/config/types
     def list_config_types(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1040,7 +981,6 @@ class OGGRestAPI:
         Retrieve the collection of configuration variable data types.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1048,13 +988,9 @@ class OGGRestAPI:
             client.list_config_types()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/config/types",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/config/types",
             raw_response=raw_response
         )
 
@@ -1062,7 +998,6 @@ class OGGRestAPI:
     def get_config_type(
         self,
         type,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1072,7 +1007,6 @@ class OGGRestAPI:
 
         Parameters:
             type (str): Required. Example: type_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1081,14 +1015,12 @@ class OGGRestAPI:
                 type='type_example'
             )
         """
-        path_params = {
-            "type": type,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/config/types/{type}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/config/types/{type}",
+            path_params={
+                "type": type,
+            },
             raw_response=raw_response
         )
 
@@ -1097,7 +1029,6 @@ class OGGRestAPI:
         self,
         type,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -1109,7 +1040,6 @@ class OGGRestAPI:
         Parameters:
             type (str): Required. Example: type_example
             data (dict): Data payload. See call example below for more details.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -1147,14 +1077,12 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "type": type,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/config/types/{type}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/config/types/{type}",
+            path_params={
+                "type": type,
+            },
             data=data,
             if_exists=if_exists,
             raw_response=raw_response
@@ -1164,7 +1092,6 @@ class OGGRestAPI:
     def delete_config_type(
         self,
         type,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1174,7 +1101,6 @@ class OGGRestAPI:
 
         Parameters:
             type (str): Required. Example: type_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1183,14 +1109,12 @@ class OGGRestAPI:
                 type='type_example'
             )
         """
-        path_params = {
-            "type": type,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/config/types/{type}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/config/types/{type}",
+            path_params={
+                "type": type,
+            },
             raw_response=raw_response
         )
 
@@ -1198,7 +1122,6 @@ class OGGRestAPI:
     def list_config_values(
         self,
         type,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1208,7 +1131,6 @@ class OGGRestAPI:
 
         Parameters:
             type (str): Required. Example: type_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1217,14 +1139,12 @@ class OGGRestAPI:
                 type='type_example'
             )
         """
-        path_params = {
-            "type": type,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/config/types/{type}/values",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/config/types/{type}/values",
+            path_params={
+                "type": type,
+            },
             raw_response=raw_response
         )
 
@@ -1233,7 +1153,6 @@ class OGGRestAPI:
         self,
         type,
         value,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1245,7 +1164,6 @@ class OGGRestAPI:
             type (str): Required. Example: type_example
             value (str): Value name, an alpha-numeric character followed by up to 63 alpha-numeric
                 characters, '_', ':' or '-'. Required. Example: value_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1255,15 +1173,13 @@ class OGGRestAPI:
                 value='value_example'
             )
         """
-        path_params = {
-            "type": type,
-            "value": value,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/config/types/{type}/values/{value}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/config/types/{type}/values/{value}",
+            path_params={
+                "type": type,
+                "value": value,
+            },
             raw_response=raw_response
         )
 
@@ -1273,7 +1189,6 @@ class OGGRestAPI:
         type,
         value,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -1287,7 +1202,6 @@ class OGGRestAPI:
             value (str): Value name, an alpha-numeric character followed by up to 63 alpha-numeric
                 characters, '_', ':' or '-'. Required. Example: value_example
             data (dict): Data payload. See call example below for more details.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -1307,15 +1221,13 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "type": type,
-            "value": value,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/config/types/{type}/values/{value}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/config/types/{type}/values/{value}",
+            path_params={
+                "type": type,
+                "value": value,
+            },
             data=data,
             if_exists=if_exists,
             raw_response=raw_response
@@ -1326,7 +1238,6 @@ class OGGRestAPI:
         self,
         type,
         value,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1338,7 +1249,6 @@ class OGGRestAPI:
             type (str): Required. Example: type_example
             value (str): Value name, an alpha-numeric character followed by up to 63 alpha-numeric
                 characters, '_', ':' or '-'. Required. Example: value_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1348,15 +1258,13 @@ class OGGRestAPI:
                 value='value_example'
             )
         """
-        path_params = {
-            "type": type,
-            "value": value,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/config/types/{type}/values/{value}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/config/types/{type}/values/{value}",
+            path_params={
+                "type": type,
+                "value": value,
+            },
             raw_response=raw_response
         )
 
@@ -1366,7 +1274,6 @@ class OGGRestAPI:
         type,
         value,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1379,7 +1286,6 @@ class OGGRestAPI:
             value (str): Value name, an alpha-numeric character followed by up to 63 alpha-numeric
                 characters, '_', ':' or '-'. Required. Example: value_example
             data (dict): Data payload. See call example below for more details.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1398,15 +1304,13 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "type": type,
-            "value": value,
-            "version": version,
-        }
         return self._call(
-            "PUT",
-            "/services/{version}/config/types/{type}/values/{value}",
-            path_params=path_params,
+            method="PUT",
+            template="/services/{version}/config/types/{type}/values/{value}",
+            path_params={
+                "type": type,
+                "value": value,
+            },
             data=data,
             raw_response=raw_response
         )
@@ -1414,7 +1318,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/connections
     def list_connections(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1424,7 +1327,6 @@ class OGGRestAPI:
             connection of the form 'domain.alias' is created.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1432,13 +1334,9 @@ class OGGRestAPI:
             client.list_connections()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/connections",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/connections",
             raw_response=raw_response
         )
 
@@ -1446,7 +1344,6 @@ class OGGRestAPI:
     def get_connection(
         self,
         connection,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1457,7 +1354,6 @@ class OGGRestAPI:
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1466,14 +1362,12 @@ class OGGRestAPI:
                 connection='MYCONN'
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/connections/{connection}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/connections/{connection}",
+            path_params={
+                "connection": connection,
+            },
             raw_response=raw_response
         )
 
@@ -1483,7 +1377,6 @@ class OGGRestAPI:
         connection,
         credentials=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -1500,7 +1393,6 @@ class OGGRestAPI:
                 credentials_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -1525,14 +1417,12 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/connections/{connection}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/connections/{connection}",
+            path_params={
+                "connection": connection,
+            },
             data=data,
             body_params={
                 "credentials": credentials,
@@ -1545,7 +1435,6 @@ class OGGRestAPI:
     def delete_connection(
         self,
         connection,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1556,7 +1445,6 @@ class OGGRestAPI:
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1565,14 +1453,12 @@ class OGGRestAPI:
                 connection='MYCONN'
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/connections/{connection}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/connections/{connection}",
+            path_params={
+                "connection": connection,
+            },
             raw_response=raw_response
         )
 
@@ -1582,7 +1468,6 @@ class OGGRestAPI:
         connection,
         credentials=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1597,7 +1482,6 @@ class OGGRestAPI:
                 credentials_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1618,14 +1502,12 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "PUT",
-            "/services/{version}/connections/{connection}",
-            path_params=path_params,
+            method="PUT",
+            template="/services/{version}/connections/{connection}",
+            path_params={
+                "connection": connection,
+            },
             data=data,
             body_params={
                 "credentials": credentials,
@@ -1637,7 +1519,6 @@ class OGGRestAPI:
     def get_active_transactions(
         self,
         connection,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1648,7 +1529,6 @@ class OGGRestAPI:
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1657,14 +1537,12 @@ class OGGRestAPI:
                 connection='MYCONN'
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/connections/{connection}/activeTransactions",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/connections/{connection}/activeTransactions",
+            path_params={
+                "connection": connection,
+            },
             raw_response=raw_response
         )
 
@@ -1672,7 +1550,6 @@ class OGGRestAPI:
     def list_database_names(
         self,
         connection,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1683,7 +1560,6 @@ class OGGRestAPI:
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1692,14 +1568,12 @@ class OGGRestAPI:
                 connection='MYCONN'
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/connections/{connection}/databases",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/connections/{connection}/databases",
+            path_params={
+                "connection": connection,
+            },
             raw_response=raw_response
         )
 
@@ -1708,7 +1582,6 @@ class OGGRestAPI:
         self,
         connection,
         database,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1720,7 +1593,6 @@ class OGGRestAPI:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
             database (str): Database name. Required. Example: database_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1730,15 +1602,13 @@ class OGGRestAPI:
                 database='database_example'
             )
         """
-        path_params = {
-            "connection": connection,
-            "database": database,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/connections/{connection}/databases/{database}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/connections/{connection}/databases/{database}",
+            path_params={
+                "connection": connection,
+                "database": database,
+            },
             raw_response=raw_response
         )
 
@@ -1748,7 +1618,6 @@ class OGGRestAPI:
         connection,
         database,
         schema,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1761,7 +1630,6 @@ class OGGRestAPI:
                 name 'domain.alias' exists. Required. Example: MYCONN
             database (str): Database name. Required. Example: database_example
             schema (str): Schema name in the database. Required. Example: schema_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1772,16 +1640,14 @@ class OGGRestAPI:
                 schema='schema_example'
             )
         """
-        path_params = {
-            "connection": connection,
-            "database": database,
-            "schema": schema,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/connections/{connection}/databases/{database}/{schema}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/connections/{connection}/databases/{database}/{schema}",
+            path_params={
+                "connection": connection,
+                "database": database,
+                "schema": schema,
+            },
             raw_response=raw_response
         )
 
@@ -1792,7 +1658,6 @@ class OGGRestAPI:
         database,
         schema,
         table,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1806,7 +1671,6 @@ class OGGRestAPI:
             database (str): Database name. Required. Example: database_example
             schema (str): Schema name in the database. Required. Example: schema_example
             table (str): Table name in the database. Required. Example: table_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1818,17 +1682,15 @@ class OGGRestAPI:
                 table='table_example'
             )
         """
-        path_params = {
-            "connection": connection,
-            "database": database,
-            "schema": schema,
-            "table": table,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/connections/{connection}/databases/{database}/{schema}/{table}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/connections/{connection}/databases/{database}/{schema}/{table}",
+            path_params={
+                "connection": connection,
+                "database": database,
+                "schema": schema,
+                "table": table,
+            },
             raw_response=raw_response
         )
 
@@ -1840,7 +1702,6 @@ class OGGRestAPI:
         schema,
         table,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1855,7 +1716,6 @@ class OGGRestAPI:
             schema (str): Schema name in the database. Required. Example: schema_example
             table (str): Table name in the database. Required. Example: table_example
             data (dict): Data payload. See call example below for more details.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1871,17 +1731,15 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "connection": connection,
-            "database": database,
-            "schema": schema,
-            "table": table,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/connections/{connection}/databases/{database}/{schema}/{table}/instantiationCsn",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/connections/{connection}/databases/{database}/{schema}/{table}/instantiationCsn",
+            path_params={
+                "connection": connection,
+                "database": database,
+                "schema": schema,
+                "table": table,
+            },
             data=data,
             raw_response=raw_response
         )
@@ -1893,7 +1751,6 @@ class OGGRestAPI:
         operation=None,
         name=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -1909,7 +1766,6 @@ class OGGRestAPI:
             name (str): Required if not included in `data`. Example: name_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -1930,14 +1786,12 @@ class OGGRestAPI:
                 name='oggadmin.checkpoints'
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/connections/{connection}/tables/checkpoint",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/connections/{connection}/tables/checkpoint",
+            path_params={
+                "connection": connection,
+            },
             data=data,
             body_params={
                 "operation": operation,
@@ -1951,7 +1805,6 @@ class OGGRestAPI:
     def get_heartbeat_table(
         self,
         connection,
-        version='v2',
         raw_response=False
     ):
         """
@@ -1962,7 +1815,6 @@ class OGGRestAPI:
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -1971,14 +1823,12 @@ class OGGRestAPI:
                 connection='MYCONN'
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/connections/{connection}/tables/heartbeat",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/connections/{connection}/tables/heartbeat",
+            path_params={
+                "connection": connection,
+            },
             raw_response=raw_response
         )
 
@@ -1987,14 +1837,13 @@ class OGGRestAPI:
         self,
         connection,
         frequency=None,
-        retentionTime=None,
-        purgeFrequency=None,
+        retention_time=None,
+        purge_frequency=None,
         partitioned=None,
-        targetOnly=None,
-        trackingExtractRestart=None,
+        target_only=None,
+        tracking_extract_restart=None,
         upgrade=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -2008,21 +1857,20 @@ class OGGRestAPI:
                 name 'domain.alias' exists. Required. Example: MYCONN
             frequency (int): Interval, in seconds, at which the heartbeat table is updated. Example:
                 frequency_example
-            retentionTime (int): Heartbeats older than this retention time (in days) will be deleted from
+            retention_time (int): Heartbeats older than this retention time (in days) will be deleted from
                 the heartbeat table. Example: retentionTime_example
-            purgeFrequency (int): Interval, in days, at which the heartbeat history table is purged.
+            purge_frequency (int): Interval, in days, at which the heartbeat history table is purged.
                 Example: purgeFrequency_example
             partitioned (bool): Whether the heartbeat history table is partitioned or not. Example:
                 partitioned_example
-            targetOnly (bool): Boolean value to enable or disable supplemental logging and the scheduler job
-                for updating heartbeat seed and heartbeat tables. Example: targetOnly_example
-            trackingExtractRestart (bool): Whether current heartbeat table setup is tracking extract restart
-                position or not. Example: trackingExtractRestart_example
+            target_only (bool): Boolean value to enable or disable supplemental logging and the scheduler
+                job for updating heartbeat seed and heartbeat tables. Example: targetOnly_example
+            tracking_extract_restart (bool): Whether current heartbeat table setup is tracking extract
+                restart position or not. Example: trackingExtractRestart_example
             upgrade (bool): Boolean value to detect when to upgrade the heartbeat tables. Example:
                 upgrade_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -2039,30 +1887,28 @@ class OGGRestAPI:
             client.create_heartbeat_table(
                 connection='MYCONN',
                 frequency=60,
-                retentionTime=None,
-                purgeFrequency=None,
+                retention_time=None,
+                purge_frequency=None,
                 partitioned=None,
-                targetOnly=None,
-                trackingExtractRestart=None,
+                target_only=None,
+                tracking_extract_restart=None,
                 upgrade=None
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/connections/{connection}/tables/heartbeat",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/connections/{connection}/tables/heartbeat",
+            path_params={
+                "connection": connection,
+            },
             data=data,
             body_params={
                 "frequency": frequency,
-                "retentionTime": retentionTime,
-                "purgeFrequency": purgeFrequency,
+                "retentionTime": retention_time,
+                "purgeFrequency": purge_frequency,
                 "partitioned": partitioned,
-                "targetOnly": targetOnly,
-                "trackingExtractRestart": trackingExtractRestart,
+                "targetOnly": target_only,
+                "trackingExtractRestart": tracking_extract_restart,
                 "upgrade": upgrade,
             },
             if_exists=if_exists,
@@ -2074,14 +1920,13 @@ class OGGRestAPI:
         self,
         connection,
         frequency=None,
-        retentionTime=None,
-        purgeFrequency=None,
+        retention_time=None,
+        purge_frequency=None,
         partitioned=None,
-        targetOnly=None,
-        trackingExtractRestart=None,
+        target_only=None,
+        tracking_extract_restart=None,
         upgrade=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2094,21 +1939,20 @@ class OGGRestAPI:
                 name 'domain.alias' exists. Required. Example: MYCONN
             frequency (int): Interval, in seconds, at which the heartbeat table is updated. Example:
                 frequency_example
-            retentionTime (int): Heartbeats older than this retention time (in days) will be deleted from
+            retention_time (int): Heartbeats older than this retention time (in days) will be deleted from
                 the heartbeat table. Example: retentionTime_example
-            purgeFrequency (int): Interval, in days, at which the heartbeat history table is purged.
+            purge_frequency (int): Interval, in days, at which the heartbeat history table is purged.
                 Example: purgeFrequency_example
             partitioned (bool): Whether the heartbeat history table is partitioned or not. Example:
                 partitioned_example
-            targetOnly (bool): Boolean value to enable or disable supplemental logging and the scheduler job
-                for updating heartbeat seed and heartbeat tables. Example: targetOnly_example
-            trackingExtractRestart (bool): Whether current heartbeat table setup is tracking extract restart
-                position or not. Example: trackingExtractRestart_example
+            target_only (bool): Boolean value to enable or disable supplemental logging and the scheduler
+                job for updating heartbeat seed and heartbeat tables. Example: targetOnly_example
+            tracking_extract_restart (bool): Whether current heartbeat table setup is tracking extract
+                restart position or not. Example: trackingExtractRestart_example
             upgrade (bool): Boolean value to detect when to upgrade the heartbeat tables. Example:
                 upgrade_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2123,30 +1967,28 @@ class OGGRestAPI:
             client.update_heartbeat_table(
                 connection='MYCONN',
                 frequency=None,
-                retentionTime=None,
-                purgeFrequency=2,
+                retention_time=None,
+                purge_frequency=2,
                 partitioned=None,
-                targetOnly=None,
-                trackingExtractRestart=None,
+                target_only=None,
+                tracking_extract_restart=None,
                 upgrade=None
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "PATCH",
-            "/services/{version}/connections/{connection}/tables/heartbeat",
-            path_params=path_params,
+            method="PATCH",
+            template="/services/{version}/connections/{connection}/tables/heartbeat",
+            path_params={
+                "connection": connection,
+            },
             data=data,
             body_params={
                 "frequency": frequency,
-                "retentionTime": retentionTime,
-                "purgeFrequency": purgeFrequency,
+                "retentionTime": retention_time,
+                "purgeFrequency": purge_frequency,
                 "partitioned": partitioned,
-                "targetOnly": targetOnly,
-                "trackingExtractRestart": trackingExtractRestart,
+                "targetOnly": target_only,
+                "trackingExtractRestart": tracking_extract_restart,
                 "upgrade": upgrade,
             },
             raw_response=raw_response
@@ -2156,7 +1998,6 @@ class OGGRestAPI:
     def delete_heartbeat_table(
         self,
         connection,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2167,7 +2008,6 @@ class OGGRestAPI:
         Parameters:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2176,14 +2016,12 @@ class OGGRestAPI:
                 connection='MYCONN'
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/connections/{connection}/tables/heartbeat",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/connections/{connection}/tables/heartbeat",
+            path_params={
+                "connection": connection,
+            },
             raw_response=raw_response
         )
 
@@ -2192,7 +2030,6 @@ class OGGRestAPI:
         self,
         connection,
         process,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2204,7 +2041,6 @@ class OGGRestAPI:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
             process (str): The name of the extract or replicat process. Required. Example: process_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2214,15 +2050,13 @@ class OGGRestAPI:
                 process='process_example'
             )
         """
-        path_params = {
-            "connection": connection,
-            "process": process,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/connections/{connection}/tables/heartbeat/{process}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/connections/{connection}/tables/heartbeat/{process}",
+            path_params={
+                "connection": connection,
+                "process": process,
+            },
             raw_response=raw_response
         )
 
@@ -2231,7 +2065,6 @@ class OGGRestAPI:
         self,
         connection,
         process,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2243,7 +2076,6 @@ class OGGRestAPI:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
             process (str): The name of the extract or replicat process. Required. Example: process_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2253,15 +2085,13 @@ class OGGRestAPI:
                 process='process_example'
             )
         """
-        path_params = {
-            "connection": connection,
-            "process": process,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/connections/{connection}/tables/heartbeat/{process}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/connections/{connection}/tables/heartbeat/{process}",
+            path_params={
+                "connection": connection,
+                "process": process,
+            },
             raw_response=raw_response
         )
 
@@ -2272,7 +2102,6 @@ class OGGRestAPI:
         operation=None,
         name=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2287,7 +2116,6 @@ class OGGRestAPI:
             name (str): Required if not included in `data`. Example: name_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2306,14 +2134,12 @@ class OGGRestAPI:
                 name='oggadmin.trace01'
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/connections/{connection}/tables/trace",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/connections/{connection}/tables/trace",
+            path_params={
+                "connection": connection,
+            },
             data=data,
             body_params={
                 "operation": operation,
@@ -2328,7 +2154,6 @@ class OGGRestAPI:
         connection,
         operation=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2342,7 +2167,6 @@ class OGGRestAPI:
             operation (str): Required if not included in `data`. Example: operation_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2359,14 +2183,12 @@ class OGGRestAPI:
                 operation='info'
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/connections/{connection}/trandata/procedure",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/connections/{connection}/trandata/procedure",
+            path_params={
+                "connection": connection,
+            },
             data=data,
             body_params={
                 "operation": operation,
@@ -2379,7 +2201,6 @@ class OGGRestAPI:
         self,
         connection,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2391,7 +2212,6 @@ class OGGRestAPI:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
             data (dict): Data payload. See call example below for more details.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2404,14 +2224,12 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/connections/{connection}/trandata/schema",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/connections/{connection}/trandata/schema",
+            path_params={
+                "connection": connection,
+            },
             data=data,
             raw_response=raw_response
         )
@@ -2421,7 +2239,6 @@ class OGGRestAPI:
         self,
         connection,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2433,7 +2250,6 @@ class OGGRestAPI:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
             data (dict): Data payload. See call example below for more details.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2446,14 +2262,12 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "connection": connection,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/connections/{connection}/trandata/table",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/connections/{connection}/trandata/table",
+            path_params={
+                "connection": connection,
+            },
             data=data,
             raw_response=raw_response
         )
@@ -2461,7 +2275,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/content
     def get_content(
         self,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -2471,7 +2284,6 @@ class OGGRestAPI:
         Top level file list.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2482,13 +2294,9 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/content",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/content",
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -2496,7 +2304,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/credentials
     def list_domains(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2505,7 +2312,6 @@ class OGGRestAPI:
         Retrieve the list of domains in the credential store.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2513,13 +2319,9 @@ class OGGRestAPI:
             client.list_domains()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/credentials",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/credentials",
             raw_response=raw_response
         )
 
@@ -2527,7 +2329,6 @@ class OGGRestAPI:
     def list_credentials(
         self,
         domain,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2537,7 +2338,6 @@ class OGGRestAPI:
 
         Parameters:
             domain (str): Credential store domain name. Required. Example: OracleGoldenGate
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2546,14 +2346,12 @@ class OGGRestAPI:
                 domain='OracleGoldenGate'
             )
         """
-        path_params = {
-            "domain": domain,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/credentials/{domain}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/credentials/{domain}",
+            path_params={
+                "domain": domain,
+            },
             raw_response=raw_response
         )
 
@@ -2562,7 +2360,6 @@ class OGGRestAPI:
         self,
         domain,
         alias,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2574,7 +2371,6 @@ class OGGRestAPI:
         Parameters:
             domain (str): Credential store domain name. Required. Example: OracleGoldenGate
             alias (str): Credential store alias. Required. Example: ggnorth
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2584,15 +2380,13 @@ class OGGRestAPI:
                 alias='ggnorth'
             )
         """
-        path_params = {
-            "domain": domain,
-            "alias": alias,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/credentials/{domain}/{alias}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/credentials/{domain}/{alias}",
+            path_params={
+                "domain": domain,
+                "alias": alias,
+            },
             raw_response=raw_response
         )
 
@@ -2604,7 +2398,6 @@ class OGGRestAPI:
         userid=None,
         password=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -2620,7 +2413,6 @@ class OGGRestAPI:
             password (str):  Example: password_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -2643,15 +2435,13 @@ class OGGRestAPI:
                 password='oggadmin'
             )
         """
-        path_params = {
-            "domain": domain,
-            "alias": alias,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/credentials/{domain}/{alias}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/credentials/{domain}/{alias}",
+            path_params={
+                "domain": domain,
+                "alias": alias,
+            },
             data=data,
             body_params={
                 "userid": userid,
@@ -2666,7 +2456,6 @@ class OGGRestAPI:
         self,
         domain,
         alias,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2677,7 +2466,6 @@ class OGGRestAPI:
         Parameters:
             domain (str): Credential store domain name. Required. Example: OracleGoldenGate
             alias (str): Credential store alias. Required. Example: ggnorth
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2687,15 +2475,13 @@ class OGGRestAPI:
                 alias='ggnorth'
             )
         """
-        path_params = {
-            "domain": domain,
-            "alias": alias,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/credentials/{domain}/{alias}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/credentials/{domain}/{alias}",
+            path_params={
+                "domain": domain,
+                "alias": alias,
+            },
             raw_response=raw_response
         )
 
@@ -2707,7 +2493,6 @@ class OGGRestAPI:
         userid=None,
         password=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2722,7 +2507,6 @@ class OGGRestAPI:
             password (str):  Example: password_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2743,15 +2527,13 @@ class OGGRestAPI:
                 password='newPassword'
             )
         """
-        path_params = {
-            "domain": domain,
-            "alias": alias,
-            "version": version,
-        }
         return self._call(
-            "PUT",
-            "/services/{version}/credentials/{domain}/{alias}",
-            path_params=path_params,
+            method="PUT",
+            template="/services/{version}/credentials/{domain}/{alias}",
+            path_params={
+                "domain": domain,
+                "alias": alias,
+            },
             data=data,
             body_params={
                 "userid": userid,
@@ -2765,7 +2547,6 @@ class OGGRestAPI:
         self,
         domain,
         alias,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2776,7 +2557,6 @@ class OGGRestAPI:
         Parameters:
             domain (str): Credential store domain name. Required. Example: OracleGoldenGate
             alias (str): Credential store alias. Required. Example: ggnorth
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2786,22 +2566,19 @@ class OGGRestAPI:
                 alias='ggnorth'
             )
         """
-        path_params = {
-            "domain": domain,
-            "alias": alias,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/credentials/{domain}/{alias}/valid",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/credentials/{domain}/{alias}/valid",
+            path_params={
+                "domain": domain,
+                "alias": alias,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/currentuser
     def get_current_user(
         self,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -2811,7 +2588,6 @@ class OGGRestAPI:
         Return the current user's identity information encoded in the request.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2822,13 +2598,9 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/currentuser",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/currentuser",
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -2836,7 +2608,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/currentuser
     def delete_current_user(
         self,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -2846,7 +2617,6 @@ class OGGRestAPI:
         Remove the current user's identity information encoded in the request.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2857,13 +2627,9 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/currentuser",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/currentuser",
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -2871,7 +2637,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/deployments
     def list_deployments(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2880,7 +2645,6 @@ class OGGRestAPI:
         Retrieve the collection of Oracle GoldenGate Deployments.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2888,13 +2652,9 @@ class OGGRestAPI:
             client.list_deployments()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/deployments",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/deployments",
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
@@ -2903,7 +2663,6 @@ class OGGRestAPI:
     def get_deployment(
         self,
         deployment,
-        version='v2',
         raw_response=False
     ):
         """
@@ -2914,7 +2673,6 @@ class OGGRestAPI:
         Parameters:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -2923,14 +2681,12 @@ class OGGRestAPI:
                 deployment='deployment_example'
             )
         """
-        path_params = {
-            "deployment": deployment,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/deployments/{deployment}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/deployments/{deployment}",
+            path_params={
+                "deployment": deployment,
+            },
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
@@ -2939,19 +2695,18 @@ class OGGRestAPI:
     def create_deployment(
         self,
         deployment,
-        oggHome=None,
-        oggDataHome=None,
-        oggConfHome=None,
+        ogg_home=None,
+        ogg_data_home=None,
+        ogg_conf_home=None,
         enabled=None,
         id=None,
-        oggSslHome=None,
+        ogg_ssl_home=None,
         status=None,
-        oggEtcHome=None,
-        oggVarHome=None,
+        ogg_etc_home=None,
+        ogg_var_home=None,
         environment=None,
-        passwordRegex=None,
+        password_regex=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -2963,23 +2718,22 @@ class OGGRestAPI:
         Parameters:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
-            oggHome (str): The deployment's home directory. Example: oggHome_example
-            oggDataHome (str): The deployment's var/data user data directory. Example: oggDataHome_example
-            oggConfHome (str): The deployment's configuration directory. Example: oggConfHome_example
+            ogg_home (str): The deployment's home directory. Example: oggHome_example
+            ogg_data_home (str): The deployment's var/data user data directory. Example: oggDataHome_example
+            ogg_conf_home (str): The deployment's configuration directory. Example: oggConfHome_example
             enabled (bool): Indicates the deployment is managed by the Service Manager. Example:
                 enabled_example
             id (str): An identifier that uniquely identifies this deployment. Example: id_example
-            oggSslHome (str): The deployment's SSL configuration directory. Example: oggSslHome_example
+            ogg_ssl_home (str): The deployment's SSL configuration directory. Example: oggSslHome_example
             status (str): Indicates the status of the deployment. Example: status_example
-            oggEtcHome (str): The deployment's etc configuration directory. Example: oggEtcHome_example
-            oggVarHome (str): The deployment's var user data directory. Example: oggVarHome_example
+            ogg_etc_home (str): The deployment's etc configuration directory. Example: oggEtcHome_example
+            ogg_var_home (str): The deployment's var user data directory. Example: oggVarHome_example
             environment (list): Additional environment variables for the deployment. Example:
                 environment_example
-            passwordRegex (str): The regular expression that new user passwords must match. Example:
+            password_regex (str): The regular expression that new user passwords must match. Example:
                 passwordRegex_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -2997,45 +2751,43 @@ class OGGRestAPI:
 
             client.create_deployment(
                 deployment='deployment_example',
-                oggHome='/home/oracle/oggSecondary',
-                oggDataHome=None,
-                oggConfHome=None,
+                ogg_home='/home/oracle/oggSecondary',
+                ogg_data_home=None,
+                ogg_conf_home=None,
                 enabled=False,
                 id=None,
-                oggSslHome=None,
+                ogg_ssl_home=None,
                 status=None,
-                oggEtcHome='/home/oracle/ogg/etc',
-                oggVarHome=None,
+                ogg_etc_home='/home/oracle/ogg/etc',
+                ogg_var_home=None,
                 environment=[
                     {
                         "name": None,
                         "value": None
                     }
                 ],
-                passwordRegex=None
+                password_regex=None
             )
         """
-        path_params = {
-            "deployment": deployment,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/deployments/{deployment}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/deployments/{deployment}",
+            path_params={
+                "deployment": deployment,
+            },
             data=data,
             body_params={
-                "oggHome": oggHome,
-                "oggDataHome": oggDataHome,
-                "oggConfHome": oggConfHome,
+                "oggHome": ogg_home,
+                "oggDataHome": ogg_data_home,
+                "oggConfHome": ogg_conf_home,
                 "enabled": enabled,
                 "id": id,
-                "oggSslHome": oggSslHome,
+                "oggSslHome": ogg_ssl_home,
                 "status": status,
-                "oggEtcHome": oggEtcHome,
-                "oggVarHome": oggVarHome,
+                "oggEtcHome": ogg_etc_home,
+                "oggVarHome": ogg_var_home,
                 "environment": environment,
-                "passwordRegex": passwordRegex,
+                "passwordRegex": password_regex,
             },
             ogg_service="ServiceManager",
             if_exists=if_exists,
@@ -3046,19 +2798,18 @@ class OGGRestAPI:
     def update_deployment(
         self,
         deployment,
-        oggHome=None,
-        oggDataHome=None,
-        oggConfHome=None,
+        ogg_home=None,
+        ogg_data_home=None,
+        ogg_conf_home=None,
         enabled=None,
         id=None,
-        oggSslHome=None,
+        ogg_ssl_home=None,
         status=None,
-        oggEtcHome=None,
-        oggVarHome=None,
+        ogg_etc_home=None,
+        ogg_var_home=None,
         environment=None,
-        passwordRegex=None,
+        password_regex=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3069,23 +2820,22 @@ class OGGRestAPI:
         Parameters:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
-            oggHome (str): The deployment's home directory. Example: oggHome_example
-            oggDataHome (str): The deployment's var/data user data directory. Example: oggDataHome_example
-            oggConfHome (str): The deployment's configuration directory. Example: oggConfHome_example
+            ogg_home (str): The deployment's home directory. Example: oggHome_example
+            ogg_data_home (str): The deployment's var/data user data directory. Example: oggDataHome_example
+            ogg_conf_home (str): The deployment's configuration directory. Example: oggConfHome_example
             enabled (bool): Indicates the deployment is managed by the Service Manager. Example:
                 enabled_example
             id (str): An identifier that uniquely identifies this deployment. Example: id_example
-            oggSslHome (str): The deployment's SSL configuration directory. Example: oggSslHome_example
+            ogg_ssl_home (str): The deployment's SSL configuration directory. Example: oggSslHome_example
             status (str): Indicates the status of the deployment. Example: status_example
-            oggEtcHome (str): The deployment's etc configuration directory. Example: oggEtcHome_example
-            oggVarHome (str): The deployment's var user data directory. Example: oggVarHome_example
+            ogg_etc_home (str): The deployment's etc configuration directory. Example: oggEtcHome_example
+            ogg_var_home (str): The deployment's var user data directory. Example: oggVarHome_example
             environment (list): Additional environment variables for the deployment. Example:
                 environment_example
-            passwordRegex (str): The regular expression that new user passwords must match. Example:
+            password_regex (str): The regular expression that new user passwords must match. Example:
                 passwordRegex_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3099,45 +2849,43 @@ class OGGRestAPI:
 
             client.update_deployment(
                 deployment='deployment_example',
-                oggHome=None,
-                oggDataHome=None,
-                oggConfHome=None,
+                ogg_home=None,
+                ogg_data_home=None,
+                ogg_conf_home=None,
                 enabled=True,
                 id=None,
-                oggSslHome=None,
+                ogg_ssl_home=None,
                 status=None,
-                oggEtcHome=None,
-                oggVarHome=None,
+                ogg_etc_home=None,
+                ogg_var_home=None,
                 environment=[
                     {
                         "name": None,
                         "value": None
                     }
                 ],
-                passwordRegex=None
+                password_regex=None
             )
         """
-        path_params = {
-            "deployment": deployment,
-            "version": version,
-        }
         return self._call(
-            "PATCH",
-            "/services/{version}/deployments/{deployment}",
-            path_params=path_params,
+            method="PATCH",
+            template="/services/{version}/deployments/{deployment}",
+            path_params={
+                "deployment": deployment,
+            },
             data=data,
             body_params={
-                "oggHome": oggHome,
-                "oggDataHome": oggDataHome,
-                "oggConfHome": oggConfHome,
+                "oggHome": ogg_home,
+                "oggDataHome": ogg_data_home,
+                "oggConfHome": ogg_conf_home,
                 "enabled": enabled,
                 "id": id,
-                "oggSslHome": oggSslHome,
+                "oggSslHome": ogg_ssl_home,
                 "status": status,
-                "oggEtcHome": oggEtcHome,
-                "oggVarHome": oggVarHome,
+                "oggEtcHome": ogg_etc_home,
+                "oggVarHome": ogg_var_home,
                 "environment": environment,
-                "passwordRegex": passwordRegex,
+                "passwordRegex": password_regex,
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -3147,7 +2895,6 @@ class OGGRestAPI:
     def delete_deployment(
         self,
         deployment,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3158,7 +2905,6 @@ class OGGRestAPI:
         Parameters:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3167,14 +2913,12 @@ class OGGRestAPI:
                 deployment='deployment_example'
             )
         """
-        path_params = {
-            "deployment": deployment,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/deployments/{deployment}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/deployments/{deployment}",
+            path_params={
+                "deployment": deployment,
+            },
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
@@ -3183,7 +2927,6 @@ class OGGRestAPI:
     def list_services(
         self,
         deployment,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3194,7 +2937,6 @@ class OGGRestAPI:
         Parameters:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3203,14 +2945,12 @@ class OGGRestAPI:
                 deployment='deployment_example'
             )
         """
-        path_params = {
-            "deployment": deployment,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/deployments/{deployment}/services",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/deployments/{deployment}/services",
+            path_params={
+                "deployment": deployment,
+            },
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
@@ -3220,7 +2960,6 @@ class OGGRestAPI:
         self,
         deployment,
         service,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3232,7 +2971,6 @@ class OGGRestAPI:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
             service (str): Name of the service. Required. Example: service_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3242,15 +2980,13 @@ class OGGRestAPI:
                 service='service_example'
             )
         """
-        path_params = {
-            "deployment": deployment,
-            "service": service,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/deployments/{deployment}/services/{service}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/deployments/{deployment}/services/{service}",
+            path_params={
+                "deployment": deployment,
+                "service": service,
+            },
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
@@ -3268,9 +3004,8 @@ class OGGRestAPI:
         critical=None,
         restart=None,
         locked=None,
-        configForce=None,
+        config_force=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -3294,10 +3029,9 @@ class OGGRestAPI:
             restart (dict): Control how the service is restarted if it terminates. Example: restart_example
             locked (bool): Indicates the service is locked by a security administrator and cannot be
                 started. Example: locked_example
-            configForce (bool): Force the configuration data. Example: configForce_example
+            config_force (bool): Force the configuration data. Example: configForce_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -3353,18 +3087,16 @@ class OGGRestAPI:
                     "failures": None
                 },
                 locked=None,
-                configForce=None
+                config_force=None
             )
         """
-        path_params = {
-            "deployment": deployment,
-            "service": service,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/deployments/{deployment}/services/{service}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/deployments/{deployment}/services/{service}",
+            path_params={
+                "deployment": deployment,
+                "service": service,
+            },
             data=data,
             body_params={
                 "config": config,
@@ -3375,7 +3107,7 @@ class OGGRestAPI:
                 "critical": critical,
                 "restart": restart,
                 "locked": locked,
-                "configForce": configForce,
+                "configForce": config_force,
             },
             ogg_service="ServiceManager",
             if_exists=if_exists,
@@ -3395,9 +3127,8 @@ class OGGRestAPI:
         critical=None,
         restart=None,
         locked=None,
-        configForce=None,
+        config_force=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3419,10 +3150,9 @@ class OGGRestAPI:
             restart (dict): Control how the service is restarted if it terminates. Example: restart_example
             locked (bool): Indicates the service is locked by a security administrator and cannot be
                 started. Example: locked_example
-            configForce (bool): Force the configuration data. Example: configForce_example
+            config_force (bool): Force the configuration data. Example: configForce_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3494,18 +3224,16 @@ class OGGRestAPI:
                     "failures": None
                 },
                 locked=None,
-                configForce=None
+                config_force=None
             )
         """
-        path_params = {
-            "deployment": deployment,
-            "service": service,
-            "version": version,
-        }
         return self._call(
-            "PATCH",
-            "/services/{version}/deployments/{deployment}/services/{service}",
-            path_params=path_params,
+            method="PATCH",
+            template="/services/{version}/deployments/{deployment}/services/{service}",
+            path_params={
+                "deployment": deployment,
+                "service": service,
+            },
             data=data,
             body_params={
                 "config": config,
@@ -3516,7 +3244,7 @@ class OGGRestAPI:
                 "critical": critical,
                 "restart": restart,
                 "locked": locked,
-                "configForce": configForce,
+                "configForce": config_force,
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -3527,7 +3255,6 @@ class OGGRestAPI:
         self,
         deployment,
         service,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3539,7 +3266,6 @@ class OGGRestAPI:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
             service (str): Name of the service. Required. Example: service_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3549,15 +3275,13 @@ class OGGRestAPI:
                 service='service_example'
             )
         """
-        path_params = {
-            "deployment": deployment,
-            "service": service,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/deployments/{deployment}/services/{service}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/deployments/{deployment}/services/{service}",
+            path_params={
+                "deployment": deployment,
+                "service": service,
+            },
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
@@ -3567,7 +3291,6 @@ class OGGRestAPI:
         self,
         deployment,
         service,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3579,7 +3302,6 @@ class OGGRestAPI:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
             service (str): Name of the service. Required. Example: service_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3589,15 +3311,13 @@ class OGGRestAPI:
                 service='service_example'
             )
         """
-        path_params = {
-            "deployment": deployment,
-            "service": service,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/deployments/{deployment}/services/{service}/logs",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/deployments/{deployment}/services/{service}/logs",
+            path_params={
+                "deployment": deployment,
+                "service": service,
+            },
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
@@ -3607,7 +3327,6 @@ class OGGRestAPI:
         self,
         deployment,
         service,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3619,7 +3338,6 @@ class OGGRestAPI:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
             service (str): Name of the service. Required. Example: service_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3629,15 +3347,13 @@ class OGGRestAPI:
                 service='service_example'
             )
         """
-        path_params = {
-            "deployment": deployment,
-            "service": service,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/deployments/{deployment}/services/{service}/logs/default",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/deployments/{deployment}/services/{service}/logs/default",
+            path_params={
+                "deployment": deployment,
+                "service": service,
+            },
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
@@ -3645,7 +3361,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/enckeys
     def list_encryption_keys(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3654,7 +3369,6 @@ class OGGRestAPI:
         Retrieve the names of all encryption keys
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3662,21 +3376,16 @@ class OGGRestAPI:
             client.list_encryption_keys()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/enckeys",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/enckeys",
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/enckeys/{keyName}
     def get_encryption_key(
         self,
-        keyName,
-        version='v2',
+        key_name,
         raw_response=False
     ):
         """
@@ -3685,34 +3394,30 @@ class OGGRestAPI:
         Retrieve details for an Encryption Key.
 
         Parameters:
-            keyName (str): The name of the Encryption Key. Required. Example: keyName_example
-            version (str): Defaults to v2. Example: v2
+            key_name (str): The name of the Encryption Key. Required. Example: keyName_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.get_encryption_key(
-                keyName='keyName_example'
+                key_name='keyName_example'
             )
         """
-        path_params = {
-            "keyName": keyName,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/enckeys/{keyName}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/enckeys/{key_name}",
+            path_params={
+                "key_name": key_name,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/enckeys/{keyName}
     def create_encryption_key(
         self,
-        keyName,
-        bitLength=None,
+        key_name,
+        bit_length=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -3722,12 +3427,11 @@ class OGGRestAPI:
         Create an Encryption Key.
 
         Parameters:
-            keyName (str): The name of the Encryption Key. Required. Example: keyName_example
-            bitLength (str): Length of the encryption key, in bits. Required if not included in `data`.
+            key_name (str): The name of the Encryption Key. Required. Example: keyName_example
+            bit_length (str): Length of the encryption key, in bits. Required if not included in `data`.
                 Example: bitLength_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -3735,28 +3439,26 @@ class OGGRestAPI:
 
         Example:
             client.create_encryption_key(
-                keyName='keyName_example',
+                key_name='keyName_example',
                 data={
                     "bitLength": 128
                 }
             )
 
             client.create_encryption_key(
-                keyName='keyName_example',
-                bitLength=128
+                key_name='keyName_example',
+                bit_length=128
             )
         """
-        path_params = {
-            "keyName": keyName,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/enckeys/{keyName}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/enckeys/{key_name}",
+            path_params={
+                "key_name": key_name,
+            },
             data=data,
             body_params={
-                "bitLength": bitLength,
+                "bitLength": bit_length,
             },
             if_exists=if_exists,
             raw_response=raw_response
@@ -3765,8 +3467,7 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/enckeys/{keyName}
     def delete_encryption_key(
         self,
-        keyName,
-        version='v2',
+        key_name,
         raw_response=False
     ):
         """
@@ -3775,35 +3476,31 @@ class OGGRestAPI:
         Delete an Encryption Key
 
         Parameters:
-            keyName (str): The name of the Encryption Key. Required. Example: keyName_example
-            version (str): Defaults to v2. Example: v2
+            key_name (str): The name of the Encryption Key. Required. Example: keyName_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.delete_encryption_key(
-                keyName='keyName_example'
+                key_name='keyName_example'
             )
         """
-        path_params = {
-            "keyName": keyName,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/enckeys/{keyName}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/enckeys/{key_name}",
+            path_params={
+                "key_name": key_name,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/enckeys/{keyName}/encrypt
     def encrypt_data(
         self,
-        keyName,
+        key_name,
         encoding=None,
         data_1=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3812,37 +3509,34 @@ class OGGRestAPI:
         Encrypt data using the Encryption Key.
 
         Parameters:
-            keyName (str): The name of the Encryption Key. Required. Example: keyName_example
+            key_name (str): The name of the Encryption Key. Required. Example: keyName_example
             encoding (str): Encoding to use for encrypted data in response. Example: encoding_example
             data (str): Data to be encrypted
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.encrypt_data(
-                keyName='keyName_example',
+                key_name='keyName_example',
                 data={
                     "data": "plaintext-password"
                 }
             )
 
             client.encrypt_data(
-                keyName='keyName_example',
+                key_name='keyName_example',
                 encoding=None,
                 data_1='plaintext-password'
             )
         """
-        path_params = {
-            "keyName": keyName,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/enckeys/{keyName}/encrypt",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/enckeys/{key_name}/encrypt",
+            path_params={
+                "key_name": key_name,
+            },
             data=data,
             body_params={
                 "encoding": encoding,
@@ -3854,7 +3548,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/extracts
     def list_extracts(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3863,7 +3556,6 @@ class OGGRestAPI:
         Retrieve the collection of Extract processes
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3871,13 +3563,9 @@ class OGGRestAPI:
             client.list_extracts()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/extracts",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/extracts",
             raw_response=raw_response
         )
 
@@ -3885,7 +3573,6 @@ class OGGRestAPI:
     def get_extract(
         self,
         extract,
-        version='v2',
         raw_response=False
     ):
         """
@@ -3897,7 +3584,6 @@ class OGGRestAPI:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
                 character followed by up to seven alpha-numeric characters. Required. Example:
                 extract_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -3906,14 +3592,12 @@ class OGGRestAPI:
                 extract='extract_example'
             )
         """
-        path_params = {
-            "extract": extract,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/extracts/{extract}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/extracts/{extract}",
+            path_params={
+                "extract": extract,
+            },
             raw_response=raw_response
         )
 
@@ -3924,22 +3608,21 @@ class OGGRestAPI:
         begin=None,
         passive=None,
         config=None,
-        encryptionProfile=None,
+        encryption_profile=None,
         status=None,
         critical=None,
         rollover=None,
         targets=None,
-        managedProcessSettings=None,
+        managed_process_settings=None,
         intent=None,
         registration=None,
         source=None,
         type=None,
-        miningCredentials=None,
+        mining_credentials=None,
         alias=None,
         credentials=None,
         description=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -3955,26 +3638,25 @@ class OGGRestAPI:
             begin (dict): Starting point for data processing. Example: begin_example
             passive (bool): Passive extract controlled by an alias on the target. Example: passive_example
             config (list):  Example: config_example
-            encryptionProfile (dict):  Example: encryptionProfile_example
+            encryption_profile (dict):  Example: encryptionProfile_example
             status (str): Oracle GoldenGate Process Status. Example: status_example
             critical (bool): Indicates the extract is critical to the deployment. Example: critical_example
             rollover (str): Causes Extract to increment to the next file in the trail sequence when
                 restarting. Example: rollover_example
             targets (list): Targets for captured data. Example: targets_example
-            managedProcessSettings (dict): Control how the ER process is managed by the Administration
+            managed_process_settings (dict): Control how the ER process is managed by the Administration
                 Server. Example: managedProcessSettings_example
             intent (str): Intent for data capture workflow. Example: intent_example
             registration (dict): Registration with the source database. Example: registration_example
             source (dict): Source of data to process. Example: source_example
             type (str): OGG Extract process type (read-only). Example: type_example
-            miningCredentials (dict): Credentials for downstream mining database. Example:
+            mining_credentials (dict): Credentials for downstream mining database. Example:
                 miningCredentials_example
             alias (dict):  Example: ggnorth
             credentials (dict): Credentials for source database. Example: credentials_example
             description (str): Description for the process. Example: description_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -4016,7 +3698,7 @@ class OGGRestAPI:
                     "UseridAlias oggadmin",
                     "Table       oggadmin.*;"
                 ],
-                encryptionProfile=None,
+                encryption_profile=None,
                 status=None,
                 critical=None,
                 rollover=None,
@@ -4025,14 +3707,14 @@ class OGGRestAPI:
                         "name": "X2"
                     }
                 ],
-                managedProcessSettings=None,
+                managed_process_settings=None,
                 intent=None,
                 registration='default',
                 source={
                     "tranlogs": "integrated"
                 },
                 type=None,
-                miningCredentials=None,
+                mining_credentials=None,
                 alias={
                     "name": None,
                     "manager": {
@@ -4051,30 +3733,28 @@ class OGGRestAPI:
                 description=None
             )
         """
-        path_params = {
-            "extract": extract,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/extracts/{extract}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/extracts/{extract}",
+            path_params={
+                "extract": extract,
+            },
             data=data,
             body_params={
                 "begin": begin,
                 "passive": passive,
                 "config": config,
-                "encryptionProfile": encryptionProfile,
+                "encryptionProfile": encryption_profile,
                 "status": status,
                 "critical": critical,
                 "rollover": rollover,
                 "targets": targets,
-                "managedProcessSettings": managedProcessSettings,
+                "managedProcessSettings": managed_process_settings,
                 "intent": intent,
                 "registration": registration,
                 "source": source,
                 "type": type,
-                "miningCredentials": miningCredentials,
+                "miningCredentials": mining_credentials,
                 "alias": alias,
                 "credentials": credentials,
                 "description": description,
@@ -4090,22 +3770,21 @@ class OGGRestAPI:
         begin=None,
         passive=None,
         config=None,
-        encryptionProfile=None,
+        encryption_profile=None,
         status=None,
         critical=None,
         rollover=None,
         targets=None,
-        managedProcessSettings=None,
+        managed_process_settings=None,
         intent=None,
         registration=None,
         source=None,
         type=None,
-        miningCredentials=None,
+        mining_credentials=None,
         alias=None,
         credentials=None,
         description=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4121,26 +3800,25 @@ class OGGRestAPI:
             begin (dict): Starting point for data processing. Example: begin_example
             passive (bool): Passive extract controlled by an alias on the target. Example: passive_example
             config (list):  Example: config_example
-            encryptionProfile (dict):  Example: encryptionProfile_example
+            encryption_profile (dict):  Example: encryptionProfile_example
             status (str): Oracle GoldenGate Process Status. Example: status_example
             critical (bool): Indicates the extract is critical to the deployment. Example: critical_example
             rollover (str): Causes Extract to increment to the next file in the trail sequence when
                 restarting. Example: rollover_example
             targets (list): Targets for captured data. Example: targets_example
-            managedProcessSettings (dict): Control how the ER process is managed by the Administration
+            managed_process_settings (dict): Control how the ER process is managed by the Administration
                 Server. Example: managedProcessSettings_example
             intent (str): Intent for data capture workflow. Example: intent_example
             registration (dict): Registration with the source database. Example: registration_example
             source (dict): Source of data to process. Example: source_example
             type (str): OGG Extract process type (read-only). Example: type_example
-            miningCredentials (dict): Credentials for downstream mining database. Example:
+            mining_credentials (dict): Credentials for downstream mining database. Example:
                 miningCredentials_example
             alias (dict):  Example: ggnorth
             credentials (dict): Credentials for source database. Example: credentials_example
             description (str): Description for the process. Example: description_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4159,19 +3837,19 @@ class OGGRestAPI:
                 config=[
                     None
                 ],
-                encryptionProfile=None,
+                encryption_profile=None,
                 status='running',
                 critical=None,
                 rollover=None,
                 targets=[
                     None
                 ],
-                managedProcessSettings=None,
+                managed_process_settings=None,
                 intent=None,
                 registration=None,
                 source=None,
                 type=None,
-                miningCredentials=None,
+                mining_credentials=None,
                 alias={
                     "name": None,
                     "manager": {
@@ -4188,30 +3866,28 @@ class OGGRestAPI:
                 description=None
             )
         """
-        path_params = {
-            "extract": extract,
-            "version": version,
-        }
         return self._call(
-            "PATCH",
-            "/services/{version}/extracts/{extract}",
-            path_params=path_params,
+            method="PATCH",
+            template="/services/{version}/extracts/{extract}",
+            path_params={
+                "extract": extract,
+            },
             data=data,
             body_params={
                 "begin": begin,
                 "passive": passive,
                 "config": config,
-                "encryptionProfile": encryptionProfile,
+                "encryptionProfile": encryption_profile,
                 "status": status,
                 "critical": critical,
                 "rollover": rollover,
                 "targets": targets,
-                "managedProcessSettings": managedProcessSettings,
+                "managedProcessSettings": managed_process_settings,
                 "intent": intent,
                 "registration": registration,
                 "source": source,
                 "type": type,
-                "miningCredentials": miningCredentials,
+                "miningCredentials": mining_credentials,
                 "alias": alias,
                 "credentials": credentials,
                 "description": description,
@@ -4223,7 +3899,6 @@ class OGGRestAPI:
     def delete_extract(
         self,
         extract,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4235,7 +3910,6 @@ class OGGRestAPI:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
                 character followed by up to seven alpha-numeric characters. Required. Example:
                 extract_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4244,14 +3918,12 @@ class OGGRestAPI:
                 extract='extract_example'
             )
         """
-        path_params = {
-            "extract": extract,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/extracts/{extract}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/extracts/{extract}",
+            path_params={
+                "extract": extract,
+            },
             raw_response=raw_response
         )
 
@@ -4260,7 +3932,6 @@ class OGGRestAPI:
         self,
         extract,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4273,7 +3944,6 @@ class OGGRestAPI:
                 character followed by up to seven alpha-numeric characters. Required. Example:
                 extract_example
             data (dict): Data payload. See call example below for more details.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4286,14 +3956,12 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "extract": extract,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/extracts/{extract}/command",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/extracts/{extract}/command",
+            path_params={
+                "extract": extract,
+            },
             data=data,
             raw_response=raw_response
         )
@@ -4302,7 +3970,6 @@ class OGGRestAPI:
     def get_extract_info_types(
         self,
         extract,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4314,7 +3981,6 @@ class OGGRestAPI:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
                 character followed by up to seven alpha-numeric characters. Required. Example:
                 extract_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4323,14 +3989,12 @@ class OGGRestAPI:
                 extract='extract_example'
             )
         """
-        path_params = {
-            "extract": extract,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/extracts/{extract}/info",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/extracts/{extract}/info",
+            path_params={
+                "extract": extract,
+            },
             raw_response=raw_response
         )
 
@@ -4338,7 +4002,6 @@ class OGGRestAPI:
     def get_extract_checkpoint(
         self,
         extract,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4350,7 +4013,6 @@ class OGGRestAPI:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
                 character followed by up to seven alpha-numeric characters. Required. Example:
                 extract_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4359,14 +4021,12 @@ class OGGRestAPI:
                 extract='extract_example'
             )
         """
-        path_params = {
-            "extract": extract,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/extracts/{extract}/info/checkpoints",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/extracts/{extract}/info/checkpoints",
+            path_params={
+                "extract": extract,
+            },
             raw_response=raw_response
         )
 
@@ -4374,7 +4034,6 @@ class OGGRestAPI:
     def get_extract_history(
         self,
         extract,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4386,7 +4045,6 @@ class OGGRestAPI:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
                 character followed by up to seven alpha-numeric characters. Required. Example:
                 extract_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4395,14 +4053,12 @@ class OGGRestAPI:
                 extract='extract_example'
             )
         """
-        path_params = {
-            "extract": extract,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/extracts/{extract}/info/history",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/extracts/{extract}/info/history",
+            path_params={
+                "extract": extract,
+            },
             raw_response=raw_response
         )
 
@@ -4410,7 +4066,6 @@ class OGGRestAPI:
     def list_extract_reports(
         self,
         extract,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4422,7 +4077,6 @@ class OGGRestAPI:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
                 character followed by up to seven alpha-numeric characters. Required. Example:
                 extract_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4431,14 +4085,12 @@ class OGGRestAPI:
                 extract='extract_example'
             )
         """
-        path_params = {
-            "extract": extract,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/extracts/{extract}/info/reports",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/extracts/{extract}/info/reports",
+            path_params={
+                "extract": extract,
+            },
             raw_response=raw_response
         )
 
@@ -4447,7 +4099,6 @@ class OGGRestAPI:
         self,
         extract,
         report,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4461,7 +4112,6 @@ class OGGRestAPI:
                 extract_example
             report (str): The name of the report, which is the extract name, followed by an optional
                 revision number and '.rpt'. Required. Example: report_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4471,15 +4121,13 @@ class OGGRestAPI:
                 report='report_example'
             )
         """
-        path_params = {
-            "extract": extract,
-            "report": report,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/extracts/{extract}/info/reports/{report}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/extracts/{extract}/info/reports/{report}",
+            path_params={
+                "extract": extract,
+                "report": report,
+            },
             raw_response=raw_response
         )
 
@@ -4487,7 +4135,6 @@ class OGGRestAPI:
     def get_extract_status(
         self,
         extract,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4499,7 +4146,6 @@ class OGGRestAPI:
             extract (str): The name of the extract. Extract names are upper case, begin with an alphabetic
                 character followed by up to seven alpha-numeric characters. Required. Example:
                 extract_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4508,21 +4154,18 @@ class OGGRestAPI:
                 extract='extract_example'
             )
         """
-        path_params = {
-            "extract": extract,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/extracts/{extract}/info/status",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/extracts/{extract}/info/status",
+            path_params={
+                "extract": extract,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/exttrails
     def list_extract_trails(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4530,7 +4173,6 @@ class OGGRestAPI:
         GET /services/{version}/exttrails
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4538,13 +4180,9 @@ class OGGRestAPI:
             client.list_extract_trails()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/exttrails",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/exttrails",
             ogg_service="distsrvr",
             raw_response=raw_response
         )
@@ -4552,7 +4190,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/installation/deployments
     def list_installation_deployments(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4561,7 +4198,6 @@ class OGGRestAPI:
         Retrieve a list of all Oracle GoldenGate deployments for the installation.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4569,13 +4205,9 @@ class OGGRestAPI:
             client.list_installation_deployments()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/installation/deployments",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/installation/deployments",
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
@@ -4583,7 +4215,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/installation/services
     def list_installation_services(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4592,7 +4223,6 @@ class OGGRestAPI:
         Retrieve a list of all Oracle GoldenGate services for the installation.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4600,13 +4230,9 @@ class OGGRestAPI:
             client.list_installation_services()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/installation/services",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/installation/services",
             ogg_service="ServiceManager",
             raw_response=raw_response
         )
@@ -4614,7 +4240,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/logs
     def list_logs(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4623,7 +4248,6 @@ class OGGRestAPI:
         Retrieve the set of logs for ER processes
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4631,20 +4255,15 @@ class OGGRestAPI:
             client.list_logs()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/logs",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/logs",
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/logs/events
     def list_log_events(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4653,7 +4272,6 @@ class OGGRestAPI:
         This endpoint provides a log of all critical events that occur in replication processes.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4661,13 +4279,9 @@ class OGGRestAPI:
             client.list_log_events()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/logs/events",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/logs/events",
             raw_response=raw_response
         )
 
@@ -4675,7 +4289,6 @@ class OGGRestAPI:
     def get_log(
         self,
         log,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -4686,7 +4299,6 @@ class OGGRestAPI:
 
         Parameters:
             log (str): Name of the log. Required. Example: log_example
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -4698,14 +4310,12 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "log": log,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/logs/{log}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/logs/{log}",
+            path_params={
+                "log": log,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -4716,7 +4326,6 @@ class OGGRestAPI:
         log,
         enabled=None,
         data=None,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -4732,7 +4341,6 @@ class OGGRestAPI:
             enabled (bool): Required if not included in `data`. Example: enabled_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -4753,14 +4361,12 @@ class OGGRestAPI:
                 enabled=True
             )
         """
-        path_params = {
-            "log": log,
-            "version": version,
-        }
         return self._call(
-            "PATCH",
-            "/services/{version}/logs/{log}",
-            path_params=path_params,
+            method="PATCH",
+            template="/services/{version}/logs/{log}",
+            path_params={
+                "log": log,
+            },
             data=data,
             body_params={
                 "enabled": enabled,
@@ -4773,7 +4379,6 @@ class OGGRestAPI:
     def delete_log(
         self,
         log,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -4786,7 +4391,6 @@ class OGGRestAPI:
 
         Parameters:
             log (str): Name of the log. Required. Example: log_example
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -4798,14 +4402,12 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "log": log,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/logs/{log}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/logs/{log}",
+            path_params={
+                "log": log,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -4813,7 +4415,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/masterkey
     def list_master_key_versions(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4822,7 +4423,6 @@ class OGGRestAPI:
         Retrieve all versions of the Master Key
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4830,20 +4430,15 @@ class OGGRestAPI:
             client.list_master_key_versions()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/masterkey",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/masterkey",
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/masterkey
     def create_master_key_version(
         self,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -4853,7 +4448,6 @@ class OGGRestAPI:
         Create a new Master Key version
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -4863,13 +4457,9 @@ class OGGRestAPI:
             client.create_master_key_version()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/masterkey",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/masterkey",
             if_exists=if_exists,
             raw_response=raw_response
         )
@@ -4877,8 +4467,7 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/masterkey/{keyVersion}
     def get_master_key_version(
         self,
-        keyVersion,
-        version='v2',
+        key_version,
         raw_response=False
     ):
         """
@@ -4887,35 +4476,31 @@ class OGGRestAPI:
         Retrieve a Master Key by version.
 
         Parameters:
-            keyVersion (int): The Master Key version number, 1 to 32767. Required. Example: 1
-            version (str): Defaults to v2. Example: v2
+            key_version (int): The Master Key version number, 1 to 32767. Required. Example: 1
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.get_master_key_version(
-                keyVersion=1
+                key_version=1
             )
         """
-        path_params = {
-            "keyVersion": keyVersion,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/masterkey/{keyVersion}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/masterkey/{key_version}",
+            path_params={
+                "key_version": key_version,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/masterkey/{keyVersion}
     def update_master_key_version(
         self,
-        keyVersion,
+        key_version,
         created=None,
         status=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -4924,37 +4509,34 @@ class OGGRestAPI:
         Update a Master Key version
 
         Parameters:
-            keyVersion (int): The Master Key version number, 1 to 32767. Required. Example: 1
+            key_version (int): The Master Key version number, 1 to 32767. Required. Example: 1
             created (str):  Example: created_example
             status (str): Required if not included in `data`. Example: status_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.update_master_key_version(
-                keyVersion=1,
+                key_version=1,
                 data={
                     "status": "unavailable"
                 }
             )
 
             client.update_master_key_version(
-                keyVersion=1,
+                key_version=1,
                 created=None,
                 status='unavailable'
             )
         """
-        path_params = {
-            "keyVersion": keyVersion,
-            "version": version,
-        }
         return self._call(
-            "PATCH",
-            "/services/{version}/masterkey/{keyVersion}",
-            path_params=path_params,
+            method="PATCH",
+            template="/services/{version}/masterkey/{key_version}",
+            path_params={
+                "key_version": key_version,
+            },
             data=data,
             body_params={
                 "created": created,
@@ -4966,8 +4548,7 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/masterkey/{keyVersion}
     def delete_master_key_version(
         self,
-        keyVersion,
-        version='v2',
+        key_version,
         raw_response=False
     ):
         """
@@ -4976,31 +4557,27 @@ class OGGRestAPI:
         Delete a Master Key version
 
         Parameters:
-            keyVersion (int): The Master Key version number, 1 to 32767. Required. Example: 1
-            version (str): Defaults to v2. Example: v2
+            key_version (int): The Master Key version number, 1 to 32767. Required. Example: 1
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
             client.delete_master_key_version(
-                keyVersion=1
+                key_version=1
             )
         """
-        path_params = {
-            "keyVersion": keyVersion,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/masterkey/{keyVersion}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/masterkey/{key_version}",
+            path_params={
+                "key_version": key_version,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/messages
     def list_messages(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5009,7 +4586,6 @@ class OGGRestAPI:
         Retrieve messages from the Oracle GoldenGate deployment.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5017,20 +4593,15 @@ class OGGRestAPI:
             client.list_messages()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/messages",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/messages",
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/metadata-catalog
     def get_metadata_catalog(
         self,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -5041,7 +4612,6 @@ class OGGRestAPI:
             Use this endpoint to retrieve a collection of all items in the catalog.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -5052,13 +4622,9 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/metadata-catalog",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/metadata-catalog",
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -5067,7 +4633,6 @@ class OGGRestAPI:
     def get_metadata_catalog_resource(
         self,
         resource,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -5079,7 +4644,6 @@ class OGGRestAPI:
 
         Parameters:
             resource (str): Name of the item in the metadata catalog. Required. Example: resource_example
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -5091,14 +4655,12 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "resource": resource,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/metadata-catalog/{resource}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/metadata-catalog/{resource}",
+            path_params={
+                "resource": resource,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -5106,7 +4668,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/monitoring/commands
     def list_monitoring_commands(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5114,7 +4675,6 @@ class OGGRestAPI:
         GET /services/{version}/monitoring/commands
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5122,13 +4682,9 @@ class OGGRestAPI:
             client.list_monitoring_commands()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/monitoring/commands",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/monitoring/commands",
             raw_response=raw_response
         )
 
@@ -5136,7 +4692,6 @@ class OGGRestAPI:
     def execute_monitoring_command(
         self,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5145,7 +4700,6 @@ class OGGRestAPI:
 
         Parameters:
             data (dict): Data payload. See call example below for more details.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5157,13 +4711,9 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/monitoring/commands/execute",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/monitoring/commands/execute",
             data=data,
             raw_response=raw_response
         )
@@ -5171,7 +4721,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/monitoring/lastMessageId
     def get_last_monitoring_message_id(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5179,7 +4728,6 @@ class OGGRestAPI:
         GET /services/{version}/monitoring/lastMessageId
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5187,20 +4735,15 @@ class OGGRestAPI:
             client.get_last_monitoring_message_id()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/monitoring/lastMessageId",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/monitoring/lastMessageId",
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/monitoring/lastStatusChangeId
     def get_last_status_change_id(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5208,7 +4751,6 @@ class OGGRestAPI:
         GET /services/{version}/monitoring/lastStatusChangeId
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5216,20 +4758,15 @@ class OGGRestAPI:
             client.get_last_status_change_id()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/monitoring/lastStatusChangeId",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/monitoring/lastStatusChangeId",
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/monitoring/messages
     def get_monitoring_messages(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5237,7 +4774,6 @@ class OGGRestAPI:
         GET /services/{version}/monitoring/messages
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5245,20 +4781,15 @@ class OGGRestAPI:
             client.get_monitoring_messages()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/monitoring/messages",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/monitoring/messages",
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/monitoring/statusChanges
     def list_status_changes(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5266,7 +4797,6 @@ class OGGRestAPI:
         GET /services/{version}/monitoring/statusChanges
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5274,13 +4804,9 @@ class OGGRestAPI:
             client.list_status_changes()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/monitoring/statusChanges",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/monitoring/statusChanges",
             raw_response=raw_response
         )
 
@@ -5288,7 +4814,6 @@ class OGGRestAPI:
     def list_process_messages(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5297,7 +4822,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5306,14 +4830,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/monitoring/{item}/messages",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/monitoring/{item}/messages",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5321,7 +4843,6 @@ class OGGRestAPI:
     def list_process_status_changes(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5330,7 +4851,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5339,21 +4859,18 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/monitoring/{item}/statusChanges",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/monitoring/{item}/statusChanges",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/mpoints/processes
     def list_processes(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5361,7 +4878,6 @@ class OGGRestAPI:
         GET /services/{version}/mpoints/processes
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5369,13 +4885,9 @@ class OGGRestAPI:
             client.list_processes()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/processes",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/processes",
             raw_response=raw_response
         )
 
@@ -5383,7 +4895,6 @@ class OGGRestAPI:
     def get_process_batch_sql_statistics(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5392,7 +4903,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5401,14 +4911,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/batchSqlStatistics",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/batchSqlStatistics",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5416,7 +4924,6 @@ class OGGRestAPI:
     def get_process_cache_statistics(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5425,7 +4932,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5434,14 +4940,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/cacheStatistics",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/cacheStatistics",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5449,7 +4953,6 @@ class OGGRestAPI:
     def get_er_configuration(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5458,7 +4961,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5467,14 +4969,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/configurationEr",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/configurationEr",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5482,7 +4982,6 @@ class OGGRestAPI:
     def get_manager_configuration(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5491,7 +4990,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5500,14 +4998,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/configurationManager",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/configurationManager",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5515,7 +5011,6 @@ class OGGRestAPI:
     def get_process_coordination_replicat(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5524,7 +5019,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5533,14 +5027,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/coordinationReplicat",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/coordinationReplicat",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5548,7 +5040,6 @@ class OGGRestAPI:
     def get_current_inflight_transactions(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5557,7 +5048,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5566,14 +5056,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/currentInflightTransactions",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/currentInflightTransactions",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5581,7 +5069,6 @@ class OGGRestAPI:
     def get_process_database_in_out(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5590,7 +5077,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5599,14 +5085,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/databaseInOut",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/databaseInOut",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5614,7 +5098,6 @@ class OGGRestAPI:
     def get_process_dependency_stats(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5623,7 +5106,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5632,14 +5114,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/dependencyStats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/dependencyStats",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5647,7 +5127,6 @@ class OGGRestAPI:
     def get_process_distsrvr_chunk_stats(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5656,7 +5135,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5665,14 +5143,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/distsrvrChunkStats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/distsrvrChunkStats",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5680,7 +5156,6 @@ class OGGRestAPI:
     def get_process_distsrvr_network_stats(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5689,7 +5164,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5698,14 +5172,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/distsrvrNetworkStats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/distsrvrNetworkStats",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5713,7 +5185,6 @@ class OGGRestAPI:
     def get_process_distsrvr_path_stats(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5722,7 +5193,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5731,14 +5201,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/distsrvrPathStats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/distsrvrPathStats",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5746,7 +5214,6 @@ class OGGRestAPI:
     def get_process_distsrvr_table_stats(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5755,7 +5222,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5764,14 +5230,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/distsrvrTableStats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/distsrvrTableStats",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5779,7 +5243,6 @@ class OGGRestAPI:
     def get_process_network_statistics(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5788,7 +5251,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5797,14 +5259,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/networkStatistics",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/networkStatistics",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5812,7 +5272,6 @@ class OGGRestAPI:
     def get_process_parallel_replicat(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5821,7 +5280,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5830,14 +5288,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/parallelReplicat",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/parallelReplicat",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5845,7 +5301,6 @@ class OGGRestAPI:
     def get_process_pmsrvr_proc_stats(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5854,7 +5309,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5863,14 +5317,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/pmsrvrProcStats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/pmsrvrProcStats",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5878,7 +5330,6 @@ class OGGRestAPI:
     def get_process_pmsrvr_stats(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5887,7 +5338,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5896,14 +5346,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/pmsrvrStats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/pmsrvrStats",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5911,7 +5359,6 @@ class OGGRestAPI:
     def get_process_pmsrvr_worker_stats(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5920,7 +5367,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5929,14 +5375,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/pmsrvrWorkerStats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/pmsrvrWorkerStats",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5944,7 +5388,6 @@ class OGGRestAPI:
     def get_process_position_er(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5953,7 +5396,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5962,14 +5404,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/positionEr",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/positionEr",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -5977,7 +5417,6 @@ class OGGRestAPI:
     def get_process_info(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -5986,7 +5425,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5995,14 +5433,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/process",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/process",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6010,7 +5446,6 @@ class OGGRestAPI:
     def get_process_performance(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6019,7 +5454,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6028,14 +5462,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/processPerformance",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/processPerformance",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6043,7 +5475,6 @@ class OGGRestAPI:
     def get_process_queue_bucket_statistics(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6052,7 +5483,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6061,14 +5491,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/queueBucketStatistics",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/queueBucketStatistics",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6076,7 +5504,6 @@ class OGGRestAPI:
     def get_process_queue_statistics(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6085,7 +5512,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6094,14 +5520,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/queueStatistics",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/queueStatistics",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6109,7 +5533,6 @@ class OGGRestAPI:
     def get_process_recvsrvr_stats(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6118,7 +5541,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6127,14 +5549,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/recvsrvrStats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/recvsrvrStats",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6142,7 +5562,6 @@ class OGGRestAPI:
     def get_process_statistics_extract(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6151,7 +5570,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6160,14 +5578,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/statisticsExtract",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/statisticsExtract",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6175,7 +5591,6 @@ class OGGRestAPI:
     def get_process_statistics_procedure_extract(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6184,7 +5599,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6193,14 +5607,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/statisticsProcedureExtract",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/statisticsProcedureExtract",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6208,7 +5620,6 @@ class OGGRestAPI:
     def get_process_statistics_procedure_replicat(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6217,7 +5628,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6226,14 +5636,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/statisticsProcedureReplicat",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/statisticsProcedureReplicat",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6241,7 +5649,6 @@ class OGGRestAPI:
     def get_process_statistics_replicat(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6250,7 +5657,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6259,14 +5665,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/statisticsReplicat",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/statisticsReplicat",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6274,7 +5678,6 @@ class OGGRestAPI:
     def get_process_statistics_table_extract(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6283,7 +5686,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6292,14 +5694,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/statisticsTableExtract",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/statisticsTableExtract",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6307,7 +5707,6 @@ class OGGRestAPI:
     def get_process_statistics_table_replicat(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6316,7 +5715,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6325,14 +5723,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/statisticsTableReplicat",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/statisticsTableReplicat",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6340,7 +5736,6 @@ class OGGRestAPI:
     def get_process_superpool_statistics(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6349,7 +5744,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6358,14 +5752,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/superpoolStatistics",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/superpoolStatistics",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6373,7 +5765,6 @@ class OGGRestAPI:
     def get_process_thread_performance(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6382,7 +5773,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6391,14 +5781,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/threadPerformance",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/threadPerformance",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6406,7 +5794,6 @@ class OGGRestAPI:
     def get_process_trail_input(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6415,7 +5802,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6424,14 +5810,12 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/trailInput",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/trailInput",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
@@ -6439,7 +5823,6 @@ class OGGRestAPI:
     def get_process_trail_output(
         self,
         item,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6448,7 +5831,6 @@ class OGGRestAPI:
 
         Parameters:
             item (str): Required. Example: item_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6457,21 +5839,18 @@ class OGGRestAPI:
                 item='item_example'
             )
         """
-        path_params = {
-            "item": item,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/mpoints/{item}/trailOutput",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/mpoints/{item}/trailOutput",
+            path_params={
+                "item": item,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/oggerr
     def list_ogg_errors(
         self,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -6481,7 +5860,6 @@ class OGGRestAPI:
         Retrieve all message codes from the Oracle GoldenGate deployment.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -6492,13 +5870,9 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/oggerr",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/oggerr",
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -6507,7 +5881,6 @@ class OGGRestAPI:
     def get_ogg_error_info(
         self,
         message,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -6518,7 +5891,6 @@ class OGGRestAPI:
 
         Parameters:
             message (str): The Oracle GoldenGate Message Code, OGG-99999. Required. Example: message_example
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -6530,14 +5902,12 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "message": message,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/oggerr/{message}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/oggerr/{message}",
+            path_params={
+                "message": message,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -6545,7 +5915,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/parameters
     def list_parameters(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6554,7 +5923,6 @@ class OGGRestAPI:
         Retrieve names of all known OGG parameters.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6562,13 +5930,9 @@ class OGGRestAPI:
             client.list_parameters()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/parameters",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/parameters",
             raw_response=raw_response
         )
 
@@ -6576,7 +5940,6 @@ class OGGRestAPI:
     def get_parameter_info(
         self,
         parameter,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6586,7 +5949,6 @@ class OGGRestAPI:
 
         Parameters:
             parameter (str): Name of parameter for information request. Required. Example: parameter_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6595,21 +5957,18 @@ class OGGRestAPI:
                 parameter='parameter_example'
             )
         """
-        path_params = {
-            "parameter": parameter,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/parameters/{parameter}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/parameters/{parameter}",
+            path_params={
+                "parameter": parameter,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/replicats
     def list_replicats(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6618,7 +5977,6 @@ class OGGRestAPI:
         Retrieve the collection of Replicat processes
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6626,13 +5984,9 @@ class OGGRestAPI:
             client.list_replicats()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/replicats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/replicats",
             raw_response=raw_response
         )
 
@@ -6640,7 +5994,6 @@ class OGGRestAPI:
     def get_replicat(
         self,
         replicat,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6652,7 +6005,6 @@ class OGGRestAPI:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
                 alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6661,14 +6013,12 @@ class OGGRestAPI:
                 replicat='replicat_example'
             )
         """
-        path_params = {
-            "replicat": replicat,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/replicats/{replicat}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/replicats/{replicat}",
+            path_params={
+                "replicat": replicat,
+            },
             raw_response=raw_response
         )
 
@@ -6680,10 +6030,10 @@ class OGGRestAPI:
         config=None,
         synchronized=None,
         mode=None,
-        encryptionProfile=None,
+        encryption_profile=None,
         status=None,
         critical=None,
-        managedProcessSettings=None,
+        managed_process_settings=None,
         intent=None,
         checkpoint=None,
         registration=None,
@@ -6691,7 +6041,6 @@ class OGGRestAPI:
         credentials=None,
         description=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -6709,10 +6058,10 @@ class OGGRestAPI:
             synchronized (bool): Indicates that the Replicat is stopped in a synchronized state. Example:
                 synchronized_example
             mode (dict): Mode of replication. Example: mode_example
-            encryptionProfile (dict):  Example: encryptionProfile_example
+            encryption_profile (dict):  Example: encryptionProfile_example
             status (str): Oracle GoldenGate Process Status. Example: status_example
             critical (bool): Indicates the replicat is critical to the deployment. Example: critical_example
-            managedProcessSettings (dict): Control how the ER process is managed by the Administration
+            managed_process_settings (dict): Control how the ER process is managed by the Administration
                 Server. Example: managedProcessSettings_example
             intent (str): Intent for data capture workflow. Example: intent_example
             checkpoint (dict): Location for checkpoint data. Example: checkpoint_example
@@ -6722,7 +6071,6 @@ class OGGRestAPI:
             description (str): Description for the process. Example: description_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -6761,10 +6109,10 @@ class OGGRestAPI:
                 ],
                 synchronized=None,
                 mode=None,
-                encryptionProfile=None,
+                encryption_profile=None,
                 status=None,
                 critical=None,
-                managedProcessSettings=None,
+                managed_process_settings=None,
                 intent=None,
                 checkpoint={
                     "table": "oggadmin.checkpoints"
@@ -6779,24 +6127,22 @@ class OGGRestAPI:
                 description=None
             )
         """
-        path_params = {
-            "replicat": replicat,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/replicats/{replicat}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/replicats/{replicat}",
+            path_params={
+                "replicat": replicat,
+            },
             data=data,
             body_params={
                 "begin": begin,
                 "config": config,
                 "synchronized": synchronized,
                 "mode": mode,
-                "encryptionProfile": encryptionProfile,
+                "encryptionProfile": encryption_profile,
                 "status": status,
                 "critical": critical,
-                "managedProcessSettings": managedProcessSettings,
+                "managedProcessSettings": managed_process_settings,
                 "intent": intent,
                 "checkpoint": checkpoint,
                 "registration": registration,
@@ -6816,10 +6162,10 @@ class OGGRestAPI:
         config=None,
         synchronized=None,
         mode=None,
-        encryptionProfile=None,
+        encryption_profile=None,
         status=None,
         critical=None,
-        managedProcessSettings=None,
+        managed_process_settings=None,
         intent=None,
         checkpoint=None,
         registration=None,
@@ -6827,7 +6173,6 @@ class OGGRestAPI:
         credentials=None,
         description=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6845,10 +6190,10 @@ class OGGRestAPI:
             synchronized (bool): Indicates that the Replicat is stopped in a synchronized state. Example:
                 synchronized_example
             mode (dict): Mode of replication. Example: mode_example
-            encryptionProfile (dict):  Example: encryptionProfile_example
+            encryption_profile (dict):  Example: encryptionProfile_example
             status (str): Oracle GoldenGate Process Status. Example: status_example
             critical (bool): Indicates the replicat is critical to the deployment. Example: critical_example
-            managedProcessSettings (dict): Control how the ER process is managed by the Administration
+            managed_process_settings (dict): Control how the ER process is managed by the Administration
                 Server. Example: managedProcessSettings_example
             intent (str): Intent for data capture workflow. Example: intent_example
             checkpoint (dict): Location for checkpoint data. Example: checkpoint_example
@@ -6858,7 +6203,6 @@ class OGGRestAPI:
             description (str): Description for the process. Example: description_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6878,10 +6222,10 @@ class OGGRestAPI:
                 ],
                 synchronized=None,
                 mode=None,
-                encryptionProfile=None,
+                encryption_profile=None,
                 status='running',
                 critical=None,
-                managedProcessSettings=None,
+                managed_process_settings=None,
                 intent=None,
                 checkpoint=None,
                 registration=None,
@@ -6890,24 +6234,22 @@ class OGGRestAPI:
                 description=None
             )
         """
-        path_params = {
-            "replicat": replicat,
-            "version": version,
-        }
         return self._call(
-            "PATCH",
-            "/services/{version}/replicats/{replicat}",
-            path_params=path_params,
+            method="PATCH",
+            template="/services/{version}/replicats/{replicat}",
+            path_params={
+                "replicat": replicat,
+            },
             data=data,
             body_params={
                 "begin": begin,
                 "config": config,
                 "synchronized": synchronized,
                 "mode": mode,
-                "encryptionProfile": encryptionProfile,
+                "encryptionProfile": encryption_profile,
                 "status": status,
                 "critical": critical,
-                "managedProcessSettings": managedProcessSettings,
+                "managedProcessSettings": managed_process_settings,
                 "intent": intent,
                 "checkpoint": checkpoint,
                 "registration": registration,
@@ -6922,7 +6264,6 @@ class OGGRestAPI:
     def delete_replicat(
         self,
         replicat,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6934,7 +6275,6 @@ class OGGRestAPI:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
                 alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6943,14 +6283,12 @@ class OGGRestAPI:
                 replicat='replicat_example'
             )
         """
-        path_params = {
-            "replicat": replicat,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/replicats/{replicat}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/replicats/{replicat}",
+            path_params={
+                "replicat": replicat,
+            },
             raw_response=raw_response
         )
 
@@ -6959,7 +6297,6 @@ class OGGRestAPI:
         self,
         replicat,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -6972,7 +6309,6 @@ class OGGRestAPI:
                 alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
             data (dict): Data payload. See call example below for more details.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -6985,14 +6321,12 @@ class OGGRestAPI:
                 }
             )
         """
-        path_params = {
-            "replicat": replicat,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/replicats/{replicat}/command",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/replicats/{replicat}/command",
+            path_params={
+                "replicat": replicat,
+            },
             data=data,
             raw_response=raw_response
         )
@@ -7001,7 +6335,6 @@ class OGGRestAPI:
     def get_replicat_info(
         self,
         replicat,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7013,7 +6346,6 @@ class OGGRestAPI:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
                 alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7022,14 +6354,12 @@ class OGGRestAPI:
                 replicat='replicat_example'
             )
         """
-        path_params = {
-            "replicat": replicat,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/replicats/{replicat}/info",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/replicats/{replicat}/info",
+            path_params={
+                "replicat": replicat,
+            },
             raw_response=raw_response
         )
 
@@ -7037,7 +6367,6 @@ class OGGRestAPI:
     def get_replicat_checkpoint(
         self,
         replicat,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7049,7 +6378,6 @@ class OGGRestAPI:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
                 alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7058,14 +6386,12 @@ class OGGRestAPI:
                 replicat='replicat_example'
             )
         """
-        path_params = {
-            "replicat": replicat,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/replicats/{replicat}/info/checkpoints",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/replicats/{replicat}/info/checkpoints",
+            path_params={
+                "replicat": replicat,
+            },
             raw_response=raw_response
         )
 
@@ -7073,7 +6399,6 @@ class OGGRestAPI:
     def get_replicat_history(
         self,
         replicat,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7085,7 +6410,6 @@ class OGGRestAPI:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
                 alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7094,14 +6418,12 @@ class OGGRestAPI:
                 replicat='replicat_example'
             )
         """
-        path_params = {
-            "replicat": replicat,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/replicats/{replicat}/info/history",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/replicats/{replicat}/info/history",
+            path_params={
+                "replicat": replicat,
+            },
             raw_response=raw_response
         )
 
@@ -7109,7 +6431,6 @@ class OGGRestAPI:
     def list_replicat_reports(
         self,
         replicat,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7121,7 +6442,6 @@ class OGGRestAPI:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
                 alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7130,14 +6450,12 @@ class OGGRestAPI:
                 replicat='replicat_example'
             )
         """
-        path_params = {
-            "replicat": replicat,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/replicats/{replicat}/info/reports",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/replicats/{replicat}/info/reports",
+            path_params={
+                "replicat": replicat,
+            },
             raw_response=raw_response
         )
 
@@ -7146,7 +6464,6 @@ class OGGRestAPI:
         self,
         replicat,
         report,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7160,7 +6477,6 @@ class OGGRestAPI:
                 replicat_example
             report (str): The name of the report, which is the replicat name, followed by an optional
                 revision number and '.rpt'. Required. Example: report_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7170,15 +6486,13 @@ class OGGRestAPI:
                 report='report_example'
             )
         """
-        path_params = {
-            "replicat": replicat,
-            "report": report,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/replicats/{replicat}/info/reports/{report}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/replicats/{replicat}/info/reports/{report}",
+            path_params={
+                "replicat": replicat,
+                "report": report,
+            },
             raw_response=raw_response
         )
 
@@ -7186,7 +6500,6 @@ class OGGRestAPI:
     def get_replicat_status(
         self,
         replicat,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7198,7 +6511,6 @@ class OGGRestAPI:
             replicat (str): The name of the replicat. Replicat names are upper case, begin with an
                 alphabetic character followed by up to seven alpha-numeric characters. Required. Example:
                 replicat_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7207,21 +6519,18 @@ class OGGRestAPI:
                 replicat='replicat_example'
             )
         """
-        path_params = {
-            "replicat": replicat,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/replicats/{replicat}/info/status",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/replicats/{replicat}/info/status",
+            path_params={
+                "replicat": replicat,
+            },
             raw_response=raw_response
         )
 
     # Endpoint: /services/{version}/requests
     def list_restapi_requests(
         self,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -7231,7 +6540,6 @@ class OGGRestAPI:
         Retrieve the collection of background REST API requests.
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -7242,13 +6550,9 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/requests",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/requests",
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -7257,7 +6561,6 @@ class OGGRestAPI:
     def get_restapi_request_status(
         self,
         request,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -7268,7 +6571,6 @@ class OGGRestAPI:
 
         Parameters:
             request (int): Identifier for background request. Required. Example: 1
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -7280,14 +6582,12 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "request": request,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/requests/{request}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/requests/{request}",
+            path_params={
+                "request": request,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -7296,7 +6596,6 @@ class OGGRestAPI:
     def get_restapi_request_result(
         self,
         request,
-        version='v2',
         ogg_service='',
         raw_response=False
     ):
@@ -7307,7 +6606,6 @@ class OGGRestAPI:
 
         Parameters:
             request (int): Identifier for background request. Required. Example: 1
-            version (str): Defaults to v2. Example: v2
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -7319,14 +6617,12 @@ class OGGRestAPI:
                 ogg_service='adminsrvr'
             )
         """
-        path_params = {
-            "request": request,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/requests/{request}/result",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/requests/{request}/result",
+            path_params={
+                "request": request,
+            },
             ogg_service=ogg_service,
             raw_response=raw_response
         )
@@ -7334,7 +6630,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/sources
     def list_distribution_paths(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7342,7 +6637,6 @@ class OGGRestAPI:
         GET /services/{version}/sources
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7350,13 +6644,9 @@ class OGGRestAPI:
             client.list_distribution_paths()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/sources",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/sources",
             ogg_service="distsrvr",
             raw_response=raw_response
         )
@@ -7365,7 +6655,6 @@ class OGGRestAPI:
     def get_distribution_path(
         self,
         distpath,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7374,7 +6663,6 @@ class OGGRestAPI:
 
         Parameters:
             distpath (str): Required. Example: distpath_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7383,14 +6671,12 @@ class OGGRestAPI:
                 distpath='distpath_example'
             )
         """
-        path_params = {
-            "distpath": distpath,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/sources/{distpath}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/sources/{distpath}",
+            path_params={
+                "distpath": distpath,
+            },
             ogg_service="distsrvr",
             raw_response=raw_response
         )
@@ -7401,16 +6687,15 @@ class OGGRestAPI:
         distpath,
         begin=None,
         name=None,
-        encryptionProfile=None,
+        encryption_profile=None,
         status=None,
-        targetInitiated=None,
+        target_initiated=None,
         ruleset=None,
         source=None,
         target=None,
         options=None,
         description=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -7422,10 +6707,10 @@ class OGGRestAPI:
             distpath (str): Required. Example: distpath_example
             begin (dict): Starting point for data processing. Example: begin_example
             name (str): distribution path name. Example: name_example
-            encryptionProfile (str): Name of 'ogg:encryptionProfile' value. Example:
+            encryption_profile (str): Name of 'ogg:encryptionProfile' value. Example:
                 encryptionProfile_example
             status (dict): Oracle GoldenGate Distribution Path Status. Example: status_example
-            targetInitiated (bool): Whether the target endpoint initiates the path. If true, the path needs
+            target_initiated (bool): Whether the target endpoint initiates the path. If true, the path needs
                 to be created and modified through Receiver Server, who initiates the connection with
                 Distribution Server. Otherwise, this behavior is reversed. Example: targetInitiated_example
             ruleset (dict):  Example: ruleset_example
@@ -7435,7 +6720,6 @@ class OGGRestAPI:
             description (str): Description for the path. Example: description_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -7469,9 +6753,9 @@ class OGGRestAPI:
                     "offset": 0
                 },
                 name='path1',
-                encryptionProfile=None,
+                encryption_profile=None,
                 status='running',
-                targetInitiated=None,
+                target_initiated=None,
                 ruleset=None,
                 source={
                     "uri": "trail://localhost:7999/dirdat/a1"
@@ -7505,21 +6789,19 @@ class OGGRestAPI:
                 description='my test distPath'
             )
         """
-        path_params = {
-            "distpath": distpath,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/sources/{distpath}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/sources/{distpath}",
+            path_params={
+                "distpath": distpath,
+            },
             data=data,
             body_params={
                 "begin": begin,
                 "name": name,
-                "encryptionProfile": encryptionProfile,
+                "encryptionProfile": encryption_profile,
                 "status": status,
-                "targetInitiated": targetInitiated,
+                "targetInitiated": target_initiated,
                 "ruleset": ruleset,
                 "source": source,
                 "target": target,
@@ -7537,16 +6819,15 @@ class OGGRestAPI:
         distpath,
         begin=None,
         name=None,
-        encryptionProfile=None,
+        encryption_profile=None,
         status=None,
-        targetInitiated=None,
+        target_initiated=None,
         ruleset=None,
         source=None,
         target=None,
         options=None,
         description=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7559,10 +6840,10 @@ class OGGRestAPI:
             distpath (str): Required. Example: distpath_example
             begin (dict): Starting point for data processing. Example: begin_example
             name (str): distribution path name. Example: name_example
-            encryptionProfile (str): Name of 'ogg:encryptionProfile' value. Example:
+            encryption_profile (str): Name of 'ogg:encryptionProfile' value. Example:
                 encryptionProfile_example
             status (dict): Oracle GoldenGate Distribution Path Status. Example: status_example
-            targetInitiated (bool): Whether the target endpoint initiates the path. If true, the path needs
+            target_initiated (bool): Whether the target endpoint initiates the path. If true, the path needs
                 to be created and modified through Receiver Server, who initiates the connection with
                 Distribution Server. Otherwise, this behavior is reversed. Example: targetInitiated_example
             ruleset (dict):  Example: ruleset_example
@@ -7572,7 +6853,6 @@ class OGGRestAPI:
             description (str): Description for the path. Example: description_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7589,9 +6869,9 @@ class OGGRestAPI:
                 distpath='distpath_example',
                 begin=None,
                 name=None,
-                encryptionProfile=None,
+                encryption_profile=None,
                 status='stopped',
-                targetInitiated=None,
+                target_initiated=None,
                 ruleset=None,
                 source={
                     "description": None,
@@ -7675,21 +6955,19 @@ class OGGRestAPI:
                 description=None
             )
         """
-        path_params = {
-            "distpath": distpath,
-            "version": version,
-        }
         return self._call(
-            "PATCH",
-            "/services/{version}/sources/{distpath}",
-            path_params=path_params,
+            method="PATCH",
+            template="/services/{version}/sources/{distpath}",
+            path_params={
+                "distpath": distpath,
+            },
             data=data,
             body_params={
                 "begin": begin,
                 "name": name,
-                "encryptionProfile": encryptionProfile,
+                "encryptionProfile": encryption_profile,
                 "status": status,
-                "targetInitiated": targetInitiated,
+                "targetInitiated": target_initiated,
                 "ruleset": ruleset,
                 "source": source,
                 "target": target,
@@ -7704,7 +6982,6 @@ class OGGRestAPI:
     def delete_distribution_path(
         self,
         distpath,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7713,7 +6990,6 @@ class OGGRestAPI:
 
         Parameters:
             distpath (str): Required. Example: distpath_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7722,14 +6998,12 @@ class OGGRestAPI:
                 distpath='distpath_example'
             )
         """
-        path_params = {
-            "distpath": distpath,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/sources/{distpath}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/sources/{distpath}",
+            path_params={
+                "distpath": distpath,
+            },
             ogg_service="distsrvr",
             raw_response=raw_response
         )
@@ -7738,7 +7012,6 @@ class OGGRestAPI:
     def get_distribution_path_checkpoint(
         self,
         distpath,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7747,7 +7020,6 @@ class OGGRestAPI:
 
         Parameters:
             distpath (str): Required. Example: distpath_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7756,14 +7028,12 @@ class OGGRestAPI:
                 distpath='distpath_example'
             )
         """
-        path_params = {
-            "distpath": distpath,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/sources/{distpath}/checkpoints",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/sources/{distpath}/checkpoints",
+            path_params={
+                "distpath": distpath,
+            },
             ogg_service="distsrvr",
             raw_response=raw_response
         )
@@ -7772,7 +7042,6 @@ class OGGRestAPI:
     def get_distribution_path_info(
         self,
         distpath,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7781,7 +7050,6 @@ class OGGRestAPI:
 
         Parameters:
             distpath (str): Required. Example: distpath_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7790,14 +7058,12 @@ class OGGRestAPI:
                 distpath='distpath_example'
             )
         """
-        path_params = {
-            "distpath": distpath,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/sources/{distpath}/info",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/sources/{distpath}/info",
+            path_params={
+                "distpath": distpath,
+            },
             ogg_service="distsrvr",
             raw_response=raw_response
         )
@@ -7806,7 +7072,6 @@ class OGGRestAPI:
     def get_distribution_path_stats(
         self,
         distpath,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7815,7 +7080,6 @@ class OGGRestAPI:
 
         Parameters:
             distpath (str): Required. Example: distpath_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7824,14 +7088,12 @@ class OGGRestAPI:
                 distpath='distpath_example'
             )
         """
-        path_params = {
-            "distpath": distpath,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/sources/{distpath}/stats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/sources/{distpath}/stats",
+            path_params={
+                "distpath": distpath,
+            },
             ogg_service="distsrvr",
             raw_response=raw_response
         )
@@ -7839,7 +7101,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/targets
     def list_receiver_paths(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7847,7 +7108,6 @@ class OGGRestAPI:
         GET /services/{version}/targets
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7855,13 +7115,9 @@ class OGGRestAPI:
             client.list_receiver_paths()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/targets",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/targets",
             ogg_service="recvsrvr",
             raw_response=raw_response
         )
@@ -7870,7 +7126,6 @@ class OGGRestAPI:
     def get_receiver_path(
         self,
         path,
-        version='v2',
         raw_response=False
     ):
         """
@@ -7879,7 +7134,6 @@ class OGGRestAPI:
 
         Parameters:
             path (str): Required. Example: path_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7888,14 +7142,12 @@ class OGGRestAPI:
                 path='path_example'
             )
         """
-        path_params = {
-            "path": path,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/targets/{path}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/targets/{path}",
+            path_params={
+                "path": path,
+            },
             ogg_service="recvsrvr",
             raw_response=raw_response
         )
@@ -7906,16 +7158,15 @@ class OGGRestAPI:
         path,
         begin=None,
         name=None,
-        encryptionProfile=None,
+        encryption_profile=None,
         status=None,
-        targetInitiated=None,
+        target_initiated=None,
         ruleset=None,
         source=None,
         target=None,
         options=None,
         description=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -7927,10 +7178,10 @@ class OGGRestAPI:
             path (str): Required. Example: path_example
             begin (dict): Starting point for data processing. Example: begin_example
             name (str): distribution path name. Example: name_example
-            encryptionProfile (str): Name of 'ogg:encryptionProfile' value. Example:
+            encryption_profile (str): Name of 'ogg:encryptionProfile' value. Example:
                 encryptionProfile_example
             status (dict): Oracle GoldenGate Distribution Path Status. Example: status_example
-            targetInitiated (bool): Whether the target endpoint initiates the path. If true, the path needs
+            target_initiated (bool): Whether the target endpoint initiates the path. If true, the path needs
                 to be created and modified through Receiver Server, who initiates the connection with
                 Distribution Server. Otherwise, this behavior is reversed. Example: targetInitiated_example
             ruleset (dict):  Example: ruleset_example
@@ -7940,7 +7191,6 @@ class OGGRestAPI:
             description (str): Description for the path. Example: description_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -7974,9 +7224,9 @@ class OGGRestAPI:
                     "offset": 0
                 },
                 name='path1',
-                encryptionProfile=None,
+                encryption_profile=None,
                 status='running',
-                targetInitiated=None,
+                target_initiated=None,
                 ruleset=None,
                 source={
                     "uri": "trail://localhost:7999/dirdat/a1"
@@ -8010,21 +7260,19 @@ class OGGRestAPI:
                 description='my test distPath'
             )
         """
-        path_params = {
-            "path": path,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/targets/{path}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/targets/{path}",
+            path_params={
+                "path": path,
+            },
             data=data,
             body_params={
                 "begin": begin,
                 "name": name,
-                "encryptionProfile": encryptionProfile,
+                "encryptionProfile": encryption_profile,
                 "status": status,
-                "targetInitiated": targetInitiated,
+                "targetInitiated": target_initiated,
                 "ruleset": ruleset,
                 "source": source,
                 "target": target,
@@ -8042,16 +7290,15 @@ class OGGRestAPI:
         path,
         begin=None,
         name=None,
-        encryptionProfile=None,
+        encryption_profile=None,
         status=None,
-        targetInitiated=None,
+        target_initiated=None,
         ruleset=None,
         source=None,
         target=None,
         options=None,
         description=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8062,10 +7309,10 @@ class OGGRestAPI:
             path (str): Required. Example: path_example
             begin (dict): Starting point for data processing. Example: begin_example
             name (str): distribution path name. Example: name_example
-            encryptionProfile (str): Name of 'ogg:encryptionProfile' value. Example:
+            encryption_profile (str): Name of 'ogg:encryptionProfile' value. Example:
                 encryptionProfile_example
             status (dict): Oracle GoldenGate Distribution Path Status. Example: status_example
-            targetInitiated (bool): Whether the target endpoint initiates the path. If true, the path needs
+            target_initiated (bool): Whether the target endpoint initiates the path. If true, the path needs
                 to be created and modified through Receiver Server, who initiates the connection with
                 Distribution Server. Otherwise, this behavior is reversed. Example: targetInitiated_example
             ruleset (dict):  Example: ruleset_example
@@ -8075,7 +7322,6 @@ class OGGRestAPI:
             description (str): Description for the path. Example: description_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8098,9 +7344,9 @@ class OGGRestAPI:
                 path='path_example',
                 begin=None,
                 name=None,
-                encryptionProfile=None,
+                encryption_profile=None,
                 status=None,
-                targetInitiated=None,
+                target_initiated=None,
                 ruleset=None,
                 source={
                     "description": None,
@@ -8169,21 +7415,19 @@ class OGGRestAPI:
                 description=None
             )
         """
-        path_params = {
-            "path": path,
-            "version": version,
-        }
         return self._call(
-            "PATCH",
-            "/services/{version}/targets/{path}",
-            path_params=path_params,
+            method="PATCH",
+            template="/services/{version}/targets/{path}",
+            path_params={
+                "path": path,
+            },
             data=data,
             body_params={
                 "begin": begin,
                 "name": name,
-                "encryptionProfile": encryptionProfile,
+                "encryptionProfile": encryption_profile,
                 "status": status,
-                "targetInitiated": targetInitiated,
+                "targetInitiated": target_initiated,
                 "ruleset": ruleset,
                 "source": source,
                 "target": target,
@@ -8198,7 +7442,6 @@ class OGGRestAPI:
     def delete_receiver_path(
         self,
         path,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8207,7 +7450,6 @@ class OGGRestAPI:
 
         Parameters:
             path (str): Required. Example: path_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8216,14 +7458,12 @@ class OGGRestAPI:
                 path='path_example'
             )
         """
-        path_params = {
-            "path": path,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/targets/{path}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/targets/{path}",
+            path_params={
+                "path": path,
+            },
             ogg_service="recvsrvr",
             raw_response=raw_response
         )
@@ -8232,7 +7472,6 @@ class OGGRestAPI:
     def get_receiver_path_checkpoint(
         self,
         path,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8241,7 +7480,6 @@ class OGGRestAPI:
 
         Parameters:
             path (str): Required. Example: path_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8250,14 +7488,12 @@ class OGGRestAPI:
                 path='path_example'
             )
         """
-        path_params = {
-            "path": path,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/targets/{path}/checkpoints",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/targets/{path}/checkpoints",
+            path_params={
+                "path": path,
+            },
             ogg_service="recvsrvr",
             raw_response=raw_response
         )
@@ -8266,7 +7502,6 @@ class OGGRestAPI:
     def get_receiver_path_info(
         self,
         path,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8275,7 +7510,6 @@ class OGGRestAPI:
 
         Parameters:
             path (str): Required. Example: path_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8284,14 +7518,12 @@ class OGGRestAPI:
                 path='path_example'
             )
         """
-        path_params = {
-            "path": path,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/targets/{path}/info",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/targets/{path}/info",
+            path_params={
+                "path": path,
+            },
             ogg_service="recvsrvr",
             raw_response=raw_response
         )
@@ -8300,7 +7532,6 @@ class OGGRestAPI:
     def get_receiver_path_progress(
         self,
         path,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8309,7 +7540,6 @@ class OGGRestAPI:
 
         Parameters:
             path (str): Required. Example: path_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8318,14 +7548,12 @@ class OGGRestAPI:
                 path='path_example'
             )
         """
-        path_params = {
-            "path": path,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/targets/{path}/progress",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/targets/{path}/progress",
+            path_params={
+                "path": path,
+            },
             ogg_service="recvsrvr",
             raw_response=raw_response
         )
@@ -8334,7 +7562,6 @@ class OGGRestAPI:
     def get_receiver_path_stats(
         self,
         path,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8343,7 +7570,6 @@ class OGGRestAPI:
 
         Parameters:
             path (str): Required. Example: path_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8352,14 +7578,12 @@ class OGGRestAPI:
                 path='path_example'
             )
         """
-        path_params = {
-            "path": path,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/targets/{path}/stats",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/targets/{path}/stats",
+            path_params={
+                "path": path,
+            },
             ogg_service="recvsrvr",
             raw_response=raw_response
         )
@@ -8367,7 +7591,6 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/tasks
     def list_tasks(
         self,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8376,7 +7599,6 @@ class OGGRestAPI:
         Retrieve the list of tasks
 
         Parameters:
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8384,13 +7606,9 @@ class OGGRestAPI:
             client.list_tasks()
 
         """
-        path_params = {
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/tasks",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/tasks",
             raw_response=raw_response
         )
 
@@ -8398,7 +7616,6 @@ class OGGRestAPI:
     def get_task(
         self,
         task,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8409,7 +7626,6 @@ class OGGRestAPI:
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
                 '_' or '-'. Required. Example: task_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8418,14 +7634,12 @@ class OGGRestAPI:
                 task='task_example'
             )
         """
-        path_params = {
-            "task": task,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/tasks/{task}",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/tasks/{task}",
+            path_params={
+                "task": task,
+            },
             raw_response=raw_response
         )
 
@@ -8433,7 +7647,7 @@ class OGGRestAPI:
     def create_task(
         self,
         task,
-        maxHistory=None,
+        max_history=None,
         command=None,
         enabled=None,
         schedule=None,
@@ -8443,7 +7657,6 @@ class OGGRestAPI:
         restart=None,
         description=None,
         data=None,
-        version='v2',
         raw_response=False,
         if_exists='fail'
     ):
@@ -8455,7 +7668,8 @@ class OGGRestAPI:
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
                 '_' or '-'. Required. Example: task_example
-            maxHistory (int): Number of task executions to maintain history for. Example: maxHistory_example
+            max_history (int): Number of task executions to maintain history for. Example:
+                maxHistory_example
             command (dict):  Example: command_example
             enabled (bool): Indicates if the task is enabled for execution. Example: enabled_example
             schedule (dict):  Example: schedule_example
@@ -8467,7 +7681,6 @@ class OGGRestAPI:
             description (str): A description of the task. Example: description_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
             if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
@@ -8501,7 +7714,7 @@ class OGGRestAPI:
 
             client.create_task(
                 task='task_example',
-                maxHistory=None,
+                max_history=None,
                 command={
                     "name": "report",
                     "reportType": "lag",
@@ -8535,17 +7748,15 @@ class OGGRestAPI:
                 description='Check critical lag every hour'
             )
         """
-        path_params = {
-            "task": task,
-            "version": version,
-        }
         return self._call(
-            "POST",
-            "/services/{version}/tasks/{task}",
-            path_params=path_params,
+            method="POST",
+            template="/services/{version}/tasks/{task}",
+            path_params={
+                "task": task,
+            },
             data=data,
             body_params={
-                "maxHistory": maxHistory,
+                "maxHistory": max_history,
                 "command": command,
                 "enabled": enabled,
                 "schedule": schedule,
@@ -8563,7 +7774,7 @@ class OGGRestAPI:
     def update_task(
         self,
         task,
-        maxHistory=None,
+        max_history=None,
         command=None,
         enabled=None,
         schedule=None,
@@ -8573,7 +7784,6 @@ class OGGRestAPI:
         restart=None,
         description=None,
         data=None,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8584,7 +7794,8 @@ class OGGRestAPI:
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
                 '_' or '-'. Required. Example: task_example
-            maxHistory (int): Number of task executions to maintain history for. Example: maxHistory_example
+            max_history (int): Number of task executions to maintain history for. Example:
+                maxHistory_example
             command (dict):  Example: command_example
             enabled (bool): Indicates if the task is enabled for execution. Example: enabled_example
             schedule (dict):  Example: schedule_example
@@ -8596,7 +7807,6 @@ class OGGRestAPI:
             description (str): A description of the task. Example: description_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8610,7 +7820,7 @@ class OGGRestAPI:
 
             client.update_task(
                 task='task_example',
-                maxHistory=None,
+                max_history=None,
                 command=None,
                 enabled=True,
                 schedule=None,
@@ -8629,17 +7839,15 @@ class OGGRestAPI:
                 description=None
             )
         """
-        path_params = {
-            "task": task,
-            "version": version,
-        }
         return self._call(
-            "PATCH",
-            "/services/{version}/tasks/{task}",
-            path_params=path_params,
+            method="PATCH",
+            template="/services/{version}/tasks/{task}",
+            path_params={
+                "task": task,
+            },
             data=data,
             body_params={
-                "maxHistory": maxHistory,
+                "maxHistory": max_history,
                 "command": command,
                 "enabled": enabled,
                 "schedule": schedule,
@@ -8656,7 +7864,6 @@ class OGGRestAPI:
     def delete_task(
         self,
         task,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8667,7 +7874,6 @@ class OGGRestAPI:
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
                 '_' or '-'. Required. Example: task_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8676,14 +7882,12 @@ class OGGRestAPI:
                 task='task_example'
             )
         """
-        path_params = {
-            "task": task,
-            "version": version,
-        }
         return self._call(
-            "DELETE",
-            "/services/{version}/tasks/{task}",
-            path_params=path_params,
+            method="DELETE",
+            template="/services/{version}/tasks/{task}",
+            path_params={
+                "task": task,
+            },
             raw_response=raw_response
         )
 
@@ -8691,7 +7895,6 @@ class OGGRestAPI:
     def list_task_info_types(
         self,
         task,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8702,7 +7905,6 @@ class OGGRestAPI:
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
                 '_' or '-'. Required. Example: task_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8711,14 +7913,12 @@ class OGGRestAPI:
                 task='task_example'
             )
         """
-        path_params = {
-            "task": task,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/tasks/{task}/info",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/tasks/{task}/info",
+            path_params={
+                "task": task,
+            },
             raw_response=raw_response
         )
 
@@ -8726,7 +7926,6 @@ class OGGRestAPI:
     def get_task_history(
         self,
         task,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8737,7 +7936,6 @@ class OGGRestAPI:
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
                 '_' or '-'. Required. Example: task_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8746,14 +7944,12 @@ class OGGRestAPI:
                 task='task_example'
             )
         """
-        path_params = {
-            "task": task,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/tasks/{task}/info/history",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/tasks/{task}/info/history",
+            path_params={
+                "task": task,
+            },
             raw_response=raw_response
         )
 
@@ -8761,7 +7957,6 @@ class OGGRestAPI:
     def get_task_status(
         self,
         task,
-        version='v2',
         raw_response=False
     ):
         """
@@ -8772,7 +7967,6 @@ class OGGRestAPI:
         Parameters:
             task (str): Task name, an alpha-numeric character followed by up to 63 alpha-numeric characters,
                 '_' or '-'. Required. Example: task_example
-            version (str): Defaults to v2. Example: v2
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -8781,14 +7975,12 @@ class OGGRestAPI:
                 task='task_example'
             )
         """
-        path_params = {
-            "task": task,
-            "version": version,
-        }
         return self._call(
-            "GET",
-            "/services/{version}/tasks/{task}/info/status",
-            path_params=path_params,
+            method="GET",
+            template="/services/{version}/tasks/{task}/info/status",
+            path_params={
+                "task": task,
+            },
             raw_response=raw_response
         )
 
@@ -8798,84 +7990,558 @@ class OGGRestAPI:
     commonly used operations that combine one or more API calls for convenience.
     """
 
-    def start_deployment(self, deployment, version='v2', raw_response=False):
+    def start_deployment(
+        self,
+        deployment,
+        raw_response=False,
+    ):
+        """Start a deployment by updating its status to running.
+
+        Args:
+            deployment (str): Name of the deployment to start.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_deployment API call.
+        """
         return self.update_deployment(
-            deployment,
+            deployment=deployment,
             data={'status': 'running'},
-            version=version,
             raw_response=raw_response
         )
 
-    def stop_deployment(self, deployment, version='v2', raw_response=False):
+    def stop_deployment(
+        self,
+        deployment,
+        raw_response=False,
+    ):
+        """Stop a deployment by updating its status to stopped.
+
+        Args:
+            deployment (str): Name of the deployment to stop.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_deployment API call.
+        """
         return self.update_deployment(
-            deployment,
+            deployment=deployment,
             data={'status': 'stopped'},
-            version=version,
             raw_response=raw_response
         )
 
-    def start_extract(self, extract, version='v2', raw_response=False):
+    def start_extract(
+        self,
+        extract,
+        raw_response=False,
+    ):
+        """Start an extract by updating its status to running.
+
+        Args:
+            extract (str): Name of the extract to start.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_extract API call.
+        """
         return self.update_extract(
-            extract,
+            extract=extract,
             data={'status': 'running'},
-            version=version,
             raw_response=raw_response
         )
 
-    def stop_extract(self, extract, version='v2', raw_response=False):
+    def stop_extract(
+        self,
+        extract,
+        raw_response=False,
+    ):
+        """Stop an extract by updating its status to stopped.
+
+        Args:
+            extract (str): Name of the extract to stop.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_extract API call.
+        """
         return self.update_extract(
-            extract,
+            extract=extract,
             data={'status': 'stopped'},
-            version=version,
             raw_response=raw_response
         )
 
-    def start_replicat(self, replicat, version='v2', raw_response=False):
+    def restart_extract(
+        self,
+        extract,
+        only_if_running=True
+    ):
+        """Restart an extract by updating its status to restart
+
+        Args:
+            extract (str): Name of the extract to restart.
+            only_if_running (bool, optional): If True, only restart the extract if it is currently running.
+                Defaults to True.
+        """
+        if only_if_running:
+            extract_status = self.get_extract(extract).get("status")
+            if extract_status != "running":
+                print(
+                    f"Skipping restart of extract {extract} because it is not running (status={extract_status})."
+                )
+                return
+
+        self.stop_extract(extract)
+        self.start_extract(extract)
+
+    def restart_all_extracts(
+        self,
+        only_if_running=True
+    ):
+        """Restart all extracts by updating their status to restart
+
+        Args:
+            only_if_running (bool, optional): If True, only restart extracts that are currently running.
+                Defaults to True.
+        """
+        try:
+            extracts = self.list_extracts()
+            if len(extracts) == 0:
+                print("No extracts found.")
+                return []
+        except Exception as e:
+            print(f"Error fetching extracts: {e}")
+            raise RuntimeError("Failed to fetch extracts, cannot restart extracts.") from e
+
+        for extract in extracts:
+            extract_name = extract.get("name")
+            self.restart_extract(
+                extract_name,
+                only_if_running=only_if_running
+            )
+
+    def start_replicat(
+        self,
+        replicat,
+        raw_response=False,
+    ):
+        """Start a replicat by updating its status to running.
+
+        Args:
+            replicat (str): Name of the replicat to start.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_replicat API call.
+        """
         return self.update_replicat(
-            replicat,
+            replicat=replicat,
             data={'status': 'running'},
-            version=version,
             raw_response=raw_response
         )
 
-    def stop_replicat(self, replicat, version='v2', raw_response=False):
+    def stop_replicat(
+        self,
+        replicat,
+        raw_response=False,
+    ):
+        """Stop a replicat by updating its status to stopped.
+
+        Args:
+            replicat (str): Name of the replicat to stop.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_replicat API call.
+        """
         return self.update_replicat(
-            replicat,
+            replicat=replicat,
             data={'status': 'stopped'},
-            version=version,
             raw_response=raw_response
         )
 
-    def start_distribution_path(self, distpath, version='v2', raw_response=False):
+    def restart_replicat(
+        self,
+        replicat,
+        only_if_running=True
+    ):
+        """Restart a replicat by updating its status to restart
+
+        Args:
+            replicat (str): Name of the replicat to restart.
+            only_if_running (bool, optional): If True, only restart the replicat if it is currently running.
+                Defaults to True.
+        """
+        if only_if_running:
+            replicat_status = self.get_replicat(replicat).get("status")
+            if replicat_status != "running":
+                print(
+                    f"Skipping restart of replicat {replicat} because it is not running (status={replicat_status})."
+                )
+                return
+
+        self.stop_replicat(replicat)
+        self.start_replicat(replicat)
+
+    def restart_all_replicats(
+        self,
+        only_if_running=True
+    ):
+        """Restart all replicats by updating their status to restart
+
+        Args:
+            only_if_running (bool, optional): If True, only restart replicats that are currently running.
+                Defaults to True.
+        """
+        try:
+            replicats = self.list_replicats()
+            if len(replicats) == 0:
+                print("No replicats found.")
+                return []
+        except Exception as e:
+            print(f"Error fetching replicats: {e}")
+            raise RuntimeError("Failed to fetch replicats, cannot restart replicats.") from e
+
+        for replicat in replicats:
+            replicat_name = replicat.get("name")
+            self.restart_replicat(
+                replicat_name,
+                only_if_running=only_if_running
+            )
+
+    def start_distribution_path(
+        self,
+        distpath,
+        raw_response=False,
+    ):
+        """Start a distribution path by updating its status to running.
+
+        Args:
+            distpath (str): Name of the distribution path to start.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_distribution_path API call.
+        """
         return self.update_distribution_path(
-            distpath,
+            distpath=distpath,
             data={'status': 'running'},
-            version=version,
             raw_response=raw_response
         )
 
-    def stop_distribution_path(self, distpath, version='v2', raw_response=False):
+    def stop_distribution_path(
+        self,
+        distpath,
+        raw_response=False,
+    ):
+        """Stop a distribution path by updating its status to stopped.
+
+        Args:
+            distpath (str): Name of the distribution path to stop.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_distribution_path API call.
+        """
         return self.update_distribution_path(
-            distpath,
+            distpath=distpath,
             data={'status': 'stopped'},
-            version=version,
             raw_response=raw_response
         )
 
-    def start_service(self, service, deployment, version='v2', raw_response=False):
+    def start_service(
+        self,
+        deployment,
+        service,
+        raw_response=False,
+    ):
+        """Start a service by updating its status to running.
+
+        Args:
+            deployment (str): Name of the deployment owning the service.
+            service (str): Name of the service to start.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_service API call.
+        """
         return self.update_service(
-            service,
-            deployment,
+            deployment=deployment,
+            service=service,
             data={'status': 'running'},
-            version=version,
             raw_response=raw_response
         )
 
-    def stop_service(self, service, deployment, version='v2', raw_response=False):
+    def stop_service(
+        self,
+        deployment,
+        service,
+        raw_response=False,
+    ):
+        """Stop a service by updating its status to stopped.
+
+        Args:
+            deployment (str): Name of the deployment owning the service.
+            service (str): Name of the service to stop.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_service API call.
+        """
         return self.update_service(
-            service,
-            deployment,
+            deployment=deployment,
+            service=service,
             data={'status': 'stopped'},
-            version=version,
             raw_response=raw_response
         )
+
+    def restart_service(
+        self,
+        deployment,
+        service,
+        only_if_running=True,
+        raw_response=False
+    ):
+        """Restart a service by updating its status to restart
+
+        Args:
+            deployment (str): Name of the deployment owning the service.
+            service (str): Name of the service to restart.
+            only_if_running (bool, optional): If True, only restart the service if it is currently running.
+                Defaults to True.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_service API call, or None if the service was not restarted because
+            it was not running and only_if_running is True.
+        """
+        if only_if_running:
+            service_status = self.get_service(deployment, service).get("status")
+            if service_status != "running":
+                print(
+                    f"Skipping restart of service '{service}' in deployment '{deployment}' because it is not running (status={service_status})."
+                )
+                return
+
+        return self.update_service(
+            deployment=deployment,
+            service=service,
+            data={'status': 'restart'},
+            raw_response=raw_response
+        )
+
+    def patch_deployment(
+        self,
+        deployment,
+        new_home,
+        restart_deployment=True,
+        restart_processes=True,
+        ask_credentials=False,
+    ):
+        """Patch GoldenGate deployment with new home and optionally restart services and processes.
+        For ServiceManager deployment, only patch the home and restart services, but do not restart extracts/replicats.
+
+        Args:
+            deployment (str): Name of the deployment to patch.
+            new_home (str): Path to the new GoldenGate home.
+            restart_deployment (bool, optional): Whether to restart the deployment. Defaults to True.
+            restart_processes (bool, optional): Whether to restart extracts and replicats. Defaults to True.
+            ask_credentials (bool, optional): Whether to ask for credentials for the deployment. Defaults to False.
+        """
+        print(f"Fetching deployment '{deployment}'...")
+        deployment_info = self.get_deployment(deployment)
+        current_home = deployment_info.get("oggHome")
+
+        print(f"Updating home from '{current_home}' to '{new_home}' for deployment '{deployment}'...")
+        self.update_deployment(
+            deployment,
+            data={
+                'oggHome': new_home,
+            }
+        )
+        print(f"Successfully updated home for deployment '{deployment}'.")
+
+        if restart_deployment:
+            print(f"Restarting deployment '{deployment}' to apply new home...")
+            self.update_deployment(
+                deployment=deployment,
+                data={'status': 'restart'}
+            )
+
+            while True:
+                print(f"Checking if deployment '{deployment}' is running before continuing...")
+                try:
+                    deployment_status = self.get_deployment(deployment).get("status")
+                    if deployment_status == "running":
+                        print(f"Deployment '{deployment}' is running. Continuing...")
+                        break
+                    else:
+                        print(
+                            f"Waiting for deployment '{deployment}' to be running before continuing..."
+                            f" Current status: {deployment_status}"
+                        )
+                except Exception as e:
+                    print(f"Error fetching deployment status: {e}. Retrying...")
+                time.sleep(5)
+
+            # For the Service Manager deployment, we restart all services except the Service Manager service itself.
+            # The reason is that the services like the AIService do not pick up the new home automatically.
+            if deployment == "ServiceManager":
+                services = self.list_services("ServiceManager")
+                for service in services:
+                    service_name = service.get("name")
+                    if service_name == "ServiceManager":
+                        continue
+
+                    service_status = service.get("status")
+                    if service_status != "running":
+                        print(
+                            f"Skipping restart of service '{service_name}' in deployment 'ServiceManager'"
+                            f" because it is not running (status={service_status})."
+                        )
+                        continue
+                    else:
+                        print(f"Restarting service '{service_name}' in deployment 'ServiceManager'...")
+                        self.stop_service("ServiceManager", service_name)
+                        self.start_service("ServiceManager", service_name)
+
+        else:
+            print(
+                f"Skipping deployment restart for deployment '{deployment}' because restart_deployment=False. "
+                "You should restart the deployment manually to use the new home.")
+
+        if deployment != "ServiceManager":
+            if restart_processes:
+                if ask_credentials:
+                    deployment_username = input(f"Enter username for deployment '{deployment}': ")
+                    deployment_password = getpass.getpass(prompt=f"Enter password for deployment '{deployment}': ")
+                    old_auth = self.auth
+                    self.auth = (deployment_username, deployment_password)
+
+                old_deployment = self.deployment
+                self.deployment = deployment  # Set deployment for reverse proxy auth
+
+                try:
+                    extracts = self.list_extracts()
+                    if len(extracts) == 0:
+                        print(f"No extracts found for deployment '{deployment}'.")
+                    else:
+                        print(f"Restarting extracts for deployment '{deployment}'...")
+                except Exception as e:
+                    print(f"Error fetching extracts: {e}")
+                    extracts = []
+                    print(f"Skipping extract restarts for deployment '{deployment}' due to error fetching extracts. "
+                          "You should restart the extracts manually to use the new home.")
+                for extract in extracts:
+                    print(f"Restarting extract '{extract.get('name')}' for deployment '{deployment}'...")
+                    self.restart_extract(extract.get("name"), only_if_running=True)
+
+                try:
+                    replicats = self.list_replicats()
+                    if len(replicats) == 0:
+                        print(f"No replicats found for deployment '{deployment}'.")
+                    else:
+                        print(f"Restarting replicats for deployment '{deployment}'...")
+                except Exception as e:
+                    print(f"Error fetching replicats: {e}")
+                    replicats = []
+                    print(f"Skipping replicat restarts for deployment '{deployment}' due to error fetching replicats. "
+                          "You should restart the replicats manually to use the new home.")
+                for replicat in replicats:
+                    print(f"Restarting replicat '{replicat.get('name')}' for deployment '{deployment}'...")
+                    self.restart_replicat(replicat.get("name"), only_if_running=True)
+
+                if ask_credentials:
+                    # Restore original auth and deployment after patching each deployment
+                    # to avoid issues with next API calls.
+                    self.auth = old_auth
+                    self.deployment = old_deployment
+
+            else:
+                print(
+                    f"Skipping process restarts for deployment '{deployment}' because restart_processes=False. "
+                    "You should restart the processes manually to use the new home.")
+
+        print(f"Finished patching deployment '{deployment}'.")
+
+    def patch_deployments(
+        self,
+        new_home,
+        restart_deployment=True,
+        restart_processes=True,
+        ask_credentials=None,
+    ):
+        """Patch GoldenGate deployments
+
+        Args:
+            new_home (str): Path to the new GoldenGate home.
+            restart_deployment (bool, optional): Whether to restart the deployment. Defaults to True.
+            restart_processes (bool, optional): Whether to restart extracts and replicats. Defaults to True.
+            ask_credentials (bool, optional): Whether to ask for credentials for each deployment. Defaults to None.
+        """
+        print("Listing deployments...")
+        deployments = self.list_deployments()
+
+        if restart_processes:
+            if not self.reverse_proxy and restart_processes:
+                raise ValueError(
+                    "Cannot restart extracts and replicats when reverse_proxy is False because the API client "
+                    "is not aware of the port information for all deployments. Please set restart_processes=False,"
+                    " try again and restart the extracts and replicats manually with another client connection to "
+                    "the deployments after patching the homes."
+                )
+
+            if len(deployments) > 2:
+                if ask_credentials is None:
+                    raise ValueError(
+                        "More than two deployments detected and restart_processes is True."
+                        " It is not possible to restart extracts and replicats without knowing "
+                        "credentials for all the deployments. Either set ask_credentials=True "
+                        "to be prompted for credentials for each deployment, or ask_credentials=False"
+                        " to use the same credentials for all deployments. If you are not using a reverse "
+                        "proxy setup, you cannot restart extracts and replicats automatically with this "
+                        "method, and will need to open connections to each deployment separately to restart "
+                        "the processes after patching the homes."
+                    )
+                else:
+                    print(
+                        "More than two deployments detected and restart_processes is True. "
+                        f"ask_credentials is set to {ask_credentials}. "
+                        "Proceeding with patching deployments and restarting processes using "
+                        "individual credentials for each deployment."
+                        if ask_credentials else
+                        "the same credentials for all deployments."
+                    )
+
+        # Always patch ServiceManager first.
+        self.patch_deployment(
+            deployment="ServiceManager",
+            new_home=new_home,
+            restart_deployment=restart_deployment,
+            restart_processes=False
+        )
+
+        for deployment in deployments:
+            deployment_name = deployment.get("name")
+
+            if deployment_name == "ServiceManager":
+                continue
+
+            print("\n\n")
+            self.patch_deployment(
+                deployment=deployment_name,
+                new_home=new_home,
+                restart_deployment=restart_deployment,
+                restart_processes=restart_processes,
+                ask_credentials=ask_credentials
+            )
