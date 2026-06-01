@@ -12329,6 +12329,7 @@ class OGGRestAPI:
                 )
                 return
 
+        print(f"Restarting extract '{extract}'...")
         self.stop_extract(extract)
         self.start_extract(extract)
 
@@ -12420,6 +12421,7 @@ class OGGRestAPI:
                 )
                 return
 
+        print(f"Restarting replicat '{replicat}'...")
         self.stop_replicat(replicat)
         self.start_replicat(replicat)
 
@@ -12647,8 +12649,7 @@ class OGGRestAPI:
                         continue
                     else:
                         print(f"Restarting service '{service_name}' in deployment 'ServiceManager'...")
-                        self.stop_service("ServiceManager", service_name)
-                        self.start_service("ServiceManager", service_name)
+                        self.restart_service("ServiceManager", service_name)
 
         else:
             print(
