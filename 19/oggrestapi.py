@@ -127,9 +127,9 @@ class OGGRestAPI:
         #   - /services/deployment_name/ogg_service/v2/... for other services when a deployment is specified
         if self.reverse_proxy and template != '/services':
             if ogg_service == 'ServiceManager' or not self.deployment:
-                template = f'/services/ServiceManager/{template.lstrip("/services")}'
+                template = f'/services/ServiceManager/{template.removeprefix("/services/")}'
             else:
-                template = f'/services/{self.deployment}/{ogg_service}/{template.lstrip("/services")}'
+                template = f'/services/{self.deployment}/{ogg_service}/{template.removeprefix("/services/")}'
         return template.format(**path_params)
 
     def _call(self, method, template, *, ogg_service=None, path_params=None, params=None,
