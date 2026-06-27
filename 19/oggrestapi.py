@@ -23,7 +23,8 @@ class OGGRestAPI:
                     'http(s)://hostname:port' without NGINX reverse proxy,
                     'https://nginx_host:nginx_port' with NGINX reverse proxy.
         :param username: service username
-        :param password: service password
+        :param password: service password. If omitted, the user is prompted to
+                         enter it securely (input is not echoed).
         :param deployment: when reverse proxy is used, the deployment name to use (e.g. 'ogg_test_01')
         :param ca_cert: path to a trusted CA cert (for self-signed certs)
         :param reverse_proxy: bool, whether to use NGINX reverse proxy
@@ -35,6 +36,8 @@ class OGGRestAPI:
         self.version = version
         self.base_url = url
         self.username = username
+        if password is None:
+            password = getpass.getpass(f'Password for {username or "OGG REST API"}: ')
         self.auth = (self.username, password)
         self.headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
         self.deployment = deployment
@@ -67,18 +70,45 @@ class OGGRestAPI:
                 print(f"Failed to connect to OGG REST API at {self.base_url}. HTTP {resp.status_code}: {resp.text}")
                 raise RuntimeError(f"Connection failed with status code {resp.status_code}")
 
-    def _request(self, method, path, *, params=None, data=None, raw_response=False):
+    def _request(self, method, path, *, params=None, data=None, max_retries=3, raw_response=False):
+        """Helper method to make an HTTP request and handle common logic like retries and response parsing.
+
+        Args:
+            method (str): The HTTP method to use.
+            path (str): The API endpoint path.
+            params (dict, optional): Query parameters for the request. Defaults to None.
+            data (dict, optional): The request body data. Defaults to None.
+            max_retries (int, optional): The maximum number of retries for the request. Defaults to 3.
+            raw_response (bool, optional): Whether to return the raw response object. Defaults to False.
+
+        Returns:
+            dict or requests.Response: The parsed response or the raw response object.
+        """
         url = f'{self.base_url}{path}'
-        response = self.session.request(
-            method,
-            url,
-            auth=self.auth,
-            headers=self.headers,
-            params=params,
-            json=data,
-            verify=self.verify_ssl,
-            timeout=self.timeout
-        )
+        attempt = 0
+        while attempt < max_retries:
+            try:
+                response = self.session.request(
+                    method,
+                    url,
+                    auth=self.auth,
+                    headers=self.headers,
+                    params=params,
+                    json=data,
+                    verify=self.verify_ssl,
+                    timeout=self.timeout
+                )
+                break
+            except requests.exceptions.ConnectionError as conn_err:
+                attempt += 1
+                print(f"Attempt {attempt} failed with connection error: {conn_err}")
+                if attempt >= max_retries:
+                    raise
+                print("Retrying in 5 seconds...")
+                time.sleep(5)
+            except Exception as e:
+                print(f"An error occurred while making the request: {e}")
+                raise
 
         if raw_response:
             return response
@@ -8077,14 +8107,14 @@ class OGGRestAPI:
     def restart_extract(
         self,
         extract,
-        only_if_running=True
+        only_if_running=False
     ):
         """Restart an extract by updating its status to restart
 
         Args:
             extract (str): Name of the extract to restart.
             only_if_running (bool, optional): If True, only restart the extract if it is currently running.
-                Defaults to True.
+                Defaults to False.
         """
         if only_if_running:
             extract_status = self.get_extract(extract).get("status")
@@ -8100,13 +8130,13 @@ class OGGRestAPI:
 
     def restart_all_extracts(
         self,
-        only_if_running=True
+        only_if_running=False
     ):
         """Restart all extracts by updating their status to restart
 
         Args:
             only_if_running (bool, optional): If True, only restart extracts that are currently running.
-                Defaults to True.
+                Defaults to False.
         """
         try:
             extracts = self.list_extracts()
@@ -8169,14 +8199,14 @@ class OGGRestAPI:
     def restart_replicat(
         self,
         replicat,
-        only_if_running=True
+        only_if_running=False
     ):
         """Restart a replicat by updating its status to restart
 
         Args:
             replicat (str): Name of the replicat to restart.
             only_if_running (bool, optional): If True, only restart the replicat if it is currently running.
-                Defaults to True.
+                Defaults to False.
         """
         if only_if_running:
             replicat_status = self.get_replicat(replicat).get("status")
@@ -8192,13 +8222,13 @@ class OGGRestAPI:
 
     def restart_all_replicats(
         self,
-        only_if_running=True
+        only_if_running=False
     ):
         """Restart all replicats by updating their status to restart
 
         Args:
             only_if_running (bool, optional): If True, only restart replicats that are currently running.
-                Defaults to True.
+                Defaults to False.
         """
         try:
             replicats = self.list_replicats()
@@ -8310,7 +8340,7 @@ class OGGRestAPI:
         self,
         deployment,
         service,
-        only_if_running=True,
+        only_if_running=False,
         raw_response=False
     ):
         """Restart a service by updating its status to restart
@@ -8319,7 +8349,7 @@ class OGGRestAPI:
             deployment (str): Name of the deployment owning the service.
             service (str): Name of the service to restart.
             only_if_running (bool, optional): If True, only restart the service if it is currently running.
-                Defaults to True.
+                Defaults to False.
             raw_response (bool, optional): If True, return the raw API response.
                 Defaults to False.
 
@@ -8331,7 +8361,8 @@ class OGGRestAPI:
             service_status = self.get_service(deployment, service).get("status")
             if service_status != "running":
                 print(
-                    f"Skipping restart of service '{service}' in deployment '{deployment}' because it is not running (status={service_status})."
+                    f"Skipping restart of service '{service}' in deployment '{deployment}' "
+                    f"because it is not running (status={service_status})."
                 )
                 return
 
@@ -8340,6 +8371,157 @@ class OGGRestAPI:
             service=service,
             data={'status': 'restart'},
             raw_response=raw_response
+        )
+
+    def _wait_until_resource_running(
+        self,
+        fetch_fn,
+        resource_type,
+        resource_name,
+        sleep_seconds=5,
+        max_retries=10,
+    ):
+        """Wait until a resource reports status 'running' by repeatedly calling the provided fetch function.
+
+        Args:
+            fetch_fn (function): Method that fetches the resource and returns its details as a dict.
+                The dict must contain a 'status' key.
+            resource_type (str): Type of the resource to wait for.
+            resource_name (str): Name of the resource to wait for.
+            sleep_seconds (int, optional): Number of seconds to sleep between retries. Defaults to 5.
+            max_retries (int, optional): Maximum number of retries. Defaults to 10.
+
+        Raises:
+            RuntimeError: If the resource does not become running after the maximum number of retries.
+
+        Returns:
+            dict: The resource if it becomes running, otherwise raises an error.
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                resource = fetch_fn()
+                status = resource.get("status")
+                if status == "running":
+                    print(
+                        f"{resource_type.capitalize()} '{resource_name}' is running. Continuing..."
+                    )
+                    return resource
+
+                print(
+                    f"{resource_type.capitalize()} '{resource_name}' status is '{status}' "
+                    f"(attempt {attempt}/{max_retries}). Retrying in {sleep_seconds}s..."
+                )
+            except Exception as exc:
+                print(
+                    f"Error fetching {resource_type} '{resource_name}': {exc}. "
+                    f"Retrying in {sleep_seconds}s... (attempt {attempt}/{max_retries})"
+                )
+
+            if attempt < max_retries:
+                time.sleep(sleep_seconds)
+
+        raise RuntimeError(
+            f"{resource_type.capitalize()} '{resource_name}' did not become running after "
+            f"{max_retries} retries."
+        )
+
+    def wait_until_deployment_running(
+        self,
+        deployment,
+        sleep_seconds=5,
+        max_retries=10,
+    ):
+        """Wait until a deployment reports status 'running'.
+
+        Args:
+            deployment (str): Name of the deployment to wait for.
+            sleep_seconds (int, optional): Number of seconds to sleep between retries. Defaults to 5.
+            max_retries (int, optional): Maximum number of retries. Defaults to 10.
+
+        Returns:
+            dict: The deployment resource if it becomes running, otherwise raises an error.
+        """
+        return self._wait_until_resource_running(
+            lambda: self.get_deployment(deployment),
+            "deployment",
+            deployment,
+            sleep_seconds,
+            max_retries,
+        )
+
+    def wait_until_extract_running(
+        self,
+        extract,
+        sleep_seconds=5,
+        max_retries=10,
+    ):
+        """Wait until an extract reports status 'running'.
+
+        Args:
+            extract (str): Name of the extract to wait for.
+            sleep_seconds (int, optional): Number of seconds to sleep between retries. Defaults to 5.
+            max_retries (int, optional): Maximum number of retries. Defaults to 10.
+
+        Returns:
+            dict: The extract resource if it becomes running, otherwise raises an error.
+        """
+        return self._wait_until_resource_running(
+            lambda: self.get_extract(extract),
+            "extract",
+            extract,
+            sleep_seconds,
+            max_retries,
+        )
+
+    def wait_until_replicat_running(
+        self,
+        replicat,
+        sleep_seconds=5,
+        max_retries=10,
+    ):
+        """Wait until a replicat reports status 'running'.
+
+        Args:
+            replicat (str): Name of the replicat to wait for.
+            sleep_seconds (int, optional): Number of seconds to sleep between retries. Defaults to 5.
+            max_retries (int, optional): Maximum number of retries. Defaults to 10.
+
+        Returns:
+            dict: The replicat resource if it becomes running, otherwise raises an error.
+        """
+        return self._wait_until_resource_running(
+            lambda: self.get_replicat(replicat),
+            "replicat",
+            replicat,
+            sleep_seconds,
+            max_retries,
+        )
+
+    def wait_until_service_running(
+        self,
+        deployment,
+        service,
+        sleep_seconds=5,
+        max_retries=10,
+    ):
+        """Wait until a service reports status 'running'.
+
+        Args:
+            deployment (str): Name of the deployment owning the service.
+            service (str): Name of the service to wait for.
+            sleep_seconds (int, optional): Number of seconds to sleep between retries. Defaults to 5.
+            max_retries (int, optional): Maximum number of retries. Defaults to 10.
+
+        Returns:
+            dict: The service resource if it becomes running, otherwise raises an error.
+        """
+
+        return self._wait_until_resource_running(
+            lambda: self.get_service(deployment, service),
+            "service",
+            f"{deployment}/{service}",
+            sleep_seconds,
+            max_retries,
         )
 
     def patch_deployment(
@@ -8380,21 +8562,11 @@ class OGGRestAPI:
                 data={'status': 'restart'}
             )
 
-            while True:
-                print(f"Checking if deployment '{deployment}' is running before continuing...")
-                try:
-                    deployment_status = self.get_deployment(deployment).get("status")
-                    if deployment_status == "running":
-                        print(f"Deployment '{deployment}' is running. Continuing...")
-                        break
-                    else:
-                        print(
-                            f"Waiting for deployment '{deployment}' to be running before continuing..."
-                            f" Current status: {deployment_status}"
-                        )
-                except Exception as e:
-                    print(f"Error fetching deployment status: {e}. Retrying...")
-                time.sleep(5)
+            self.wait_until_deployment_running(
+                deployment,
+                sleep_seconds=5,
+                max_retries=10,
+            )
 
             # For the Service Manager deployment, we restart all services except the Service Manager service itself.
             # The reason is that the services like the AIService do not pick up the new home automatically.
@@ -8405,7 +8577,13 @@ class OGGRestAPI:
                     if service_name == "ServiceManager":
                         continue
 
-                    service_status = service.get("status")
+                    service_info = self.wait_until_service_running(
+                        "ServiceManager",
+                        service_name,
+                        sleep_seconds=5,
+                        max_retries=10,
+                    )
+                    service_status = service_info.get("status")
                     if service_status != "running":
                         print(
                             f"Skipping restart of service '{service_name}' in deployment 'ServiceManager'"
@@ -8414,7 +8592,11 @@ class OGGRestAPI:
                         continue
                     else:
                         print(f"Restarting service '{service_name}' in deployment 'ServiceManager'...")
-                        self.restart_service("ServiceManager", service_name)
+                        self.restart_service(
+                            deployment="ServiceManager",
+                            service=service_name,
+                            only_if_running=False
+                        )
 
         else:
             print(
@@ -8445,7 +8627,10 @@ class OGGRestAPI:
                           "You should restart the extracts manually to use the new home.")
                 for extract in extracts:
                     print(f"Restarting extract '{extract.get('name')}' for deployment '{deployment}'...")
-                    self.restart_extract(extract.get("name"), only_if_running=True)
+                    self.restart_extract(
+                        extract=extract.get("name"),
+                        only_if_running=True
+                    )
 
                 try:
                     replicats = self.list_replicats()
@@ -8460,7 +8645,10 @@ class OGGRestAPI:
                           "You should restart the replicats manually to use the new home.")
                 for replicat in replicats:
                     print(f"Restarting replicat '{replicat.get('name')}' for deployment '{deployment}'...")
-                    self.restart_replicat(replicat.get("name"), only_if_running=True)
+                    self.restart_replicat(
+                        replicat=replicat.get("name"),
+                        only_if_running=True
+                    )
 
                 if ask_credentials:
                     # Restore original auth and deployment after patching each deployment
