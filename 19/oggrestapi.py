@@ -62,22 +62,21 @@ class OGGRestAPI:
 
         # Test connection
         if test_connection:
-            # Testing connection by listing roles, which is a simple authenticated GET request that
-            # works on all versions of the API. If this fails, it will raise an exception that can
-            # be caught by the caller to handle connection issues gracefully.
+            # Verify connectivity and credentials. Raises on failure so callers can
+            # catch and handle connection issues gracefully.
             resp = self.list_roles(raw_response=True)
             if resp.status_code == 200:
                 print(f'Connected to OGG REST API at {self.base_url}')
             elif resp.status_code == 403:
-                print(
-                    f"Authentication failed when connecting to OGG REST API at {self.base_url}. "
-                    "Please check your credentials."
-                )
                 raise RuntimeError(
-                    f"Authentication failed with user {self.username}. Please check your credentials.")
+                    f"Authentication failed connecting to OGG REST API at {self.base_url} "
+                    f"with user {self.username}. Please check your credentials."
+                )
             else:
-                print(f"Failed to connect to OGG REST API at {self.base_url}. HTTP {resp.status_code}: {resp.text}")
-                raise RuntimeError(f"Connection failed with status code {resp.status_code}")
+                raise RuntimeError(
+                    f"Failed to connect to OGG REST API at {self.base_url}. "
+                    f"HTTP {resp.status_code}: {resp.text}"
+                )
 
     def _request(self, method, path, *, params=None, data=None, max_retries=3,
                  backoff_factor=1.0, raw_response=False):
@@ -110,7 +109,6 @@ class OGGRestAPI:
                     method,
                     url,
                     auth=self.auth,
-                    headers=self.headers,
                     params=params,
                     json=data,
                     verify=self.verify_ssl,
@@ -242,21 +240,27 @@ class OGGRestAPI:
         return self._request('DELETE', path, raw_response=raw_response)
 
     def _check_response(self, response, url):
-        if not response.ok:
-            try:
-                if 'messages' in response.json():
-                    messages = response.json().get('messages', [])
-                    error_messages = [
-                        f"{message['severity']} (code {response.status_code}) - "
-                        f"{url}: {message['title']}"
-                        for message in messages
-                    ]
-                    raise RuntimeError(' ; '.join(error_messages))
-                print(f'HTTP {response.status_code}: {response.text}')
-                response.raise_for_status()
-            except ValueError:
-                print(f'HTTP {response.status_code}: {response.text}')
-                response.raise_for_status()
+        if response.ok:
+            return
+
+        # Parse the body once; _parse returns text (not a dict) for non-JSON bodies.
+        body = self._parse(response)
+        messages = body.get('messages') if isinstance(body, dict) else None
+        if messages:
+            error_messages = []
+            for message in messages:
+                if isinstance(message, dict):
+                    severity = message.get('severity', 'ERROR')
+                    title = message.get('title', message)
+                else:
+                    severity, title = 'ERROR', message
+                error_messages.append(
+                    f"{severity} (code {response.status_code}) - {url}: {title}"
+                )
+            raise RuntimeError(' ; '.join(error_messages))
+
+        print(f'HTTP {response.status_code}: {response.text}')
+        response.raise_for_status()
 
     def _parse(self, response):
         try:
@@ -266,6 +270,13 @@ class OGGRestAPI:
 
     def close(self):
         self.session.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.close()
+        return False
 
     def _extract_main(self, result):
         if not isinstance(result, dict):
