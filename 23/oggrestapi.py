@@ -14,6 +14,15 @@ from pprint import pprint
 class OGGRestAPI:
     """Oracle GoldenGate REST API client."""
 
+    # HTTP statuses worth retrying (transient / server-side).
+    _RETRY_STATUSES = frozenset({429, 502, 503, 504})
+    # Exceptions worth retrying (transient network issues).
+    _RETRY_EXCEPTIONS = (
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+        requests.exceptions.ChunkedEncodingError,
+    )
+
     def __init__(self, url, username=None, password=None, deployment=None, ca_cert=None,
                  reverse_proxy=False, verify_ssl=True, test_connection=True, timeout=None, version='v2'):
         """
@@ -70,23 +79,32 @@ class OGGRestAPI:
                 print(f"Failed to connect to OGG REST API at {self.base_url}. HTTP {resp.status_code}: {resp.text}")
                 raise RuntimeError(f"Connection failed with status code {resp.status_code}")
 
-    def _request(self, method, path, *, params=None, data=None, max_retries=3, raw_response=False):
-        """Helper method to make an HTTP request and handle common logic like retries and response parsing.
+    def _request(self, method, path, *, params=None, data=None, max_retries=3,
+                 backoff_factor=1.0, raw_response=False):
+        """Make an HTTP request, retrying transient failures, then parse the response.
+
+        Retries are attempted for transient network exceptions (connection errors,
+        timeouts, chunked-encoding errors) and for retryable HTTP statuses
+        (429, 502, 503, 504), using exponential backoff. When the server sends a
+        ``Retry-After`` header, that value is honored instead of the computed delay.
 
         Args:
             method (str): The HTTP method to use.
             path (str): The API endpoint path.
             params (dict, optional): Query parameters for the request. Defaults to None.
             data (dict, optional): The request body data. Defaults to None.
-            max_retries (int, optional): The maximum number of retries for the request. Defaults to 3.
+            max_retries (int, optional): Maximum number of attempts. Defaults to 3.
+            backoff_factor (float, optional): Base delay (seconds) for exponential
+                backoff. Delay for attempt n is backoff_factor * 2**(n-1). Defaults to 1.0.
             raw_response (bool, optional): Whether to return the raw response object. Defaults to False.
 
         Returns:
             dict or requests.Response: The parsed response or the raw response object.
         """
         url = f'{self.base_url}{path}'
-        attempt = 0
-        while attempt < max_retries:
+        response = None
+        last_exc = None
+        for attempt in range(1, max_retries + 1):
             try:
                 response = self.session.request(
                     method,
@@ -98,24 +116,50 @@ class OGGRestAPI:
                     verify=self.verify_ssl,
                     timeout=self.timeout
                 )
-                break
-            except requests.exceptions.ConnectionError as conn_err:
-                attempt += 1
-                print(f"Attempt {attempt} failed with connection error: {conn_err}")
+            except self._RETRY_EXCEPTIONS as exc:
+                last_exc = exc
                 if attempt >= max_retries:
                     raise
-                print("Retrying in 5 seconds...")
-                time.sleep(5)
-            except Exception as e:
-                print(f"An error occurred while making the request: {e}")
-                raise
+                delay = self._retry_delay(attempt, backoff_factor)
+                print(f"Request to {url} failed ({exc.__class__.__name__}: {exc}); "
+                      f"retrying in {delay:.1f}s (attempt {attempt}/{max_retries})...")
+                time.sleep(delay)
+                continue
+
+            # Retry transient server-side statuses while attempts remain.
+            if response.status_code in self._RETRY_STATUSES and attempt < max_retries:
+                delay = self._retry_delay(attempt, backoff_factor, response=response)
+                print(f"Request to {url} returned HTTP {response.status_code}; "
+                      f"retrying in {delay:.1f}s (attempt {attempt}/{max_retries})...")
+                time.sleep(delay)
+                continue
+
+            break
+
+        if response is None:
+            # Every attempt raised a network exception; surface the last one.
+            raise last_exc
 
         if raw_response:
             return response
-        else:
-            result = self._parse(response)
-            self._check_response(response, url)
-            return self._extract_main(result)
+        result = self._parse(response)
+        self._check_response(response, url)
+        return self._extract_main(result)
+
+    def _retry_delay(self, attempt, backoff_factor, response=None):
+        """Compute the delay before the next retry.
+
+        Honors a ``Retry-After`` response header (seconds) when present, otherwise
+        falls back to exponential backoff: backoff_factor * 2**(attempt - 1).
+        """
+        if response is not None:
+            retry_after = response.headers.get('Retry-After')
+            if retry_after:
+                try:
+                    return float(retry_after)
+                except (TypeError, ValueError):
+                    pass
+        return backoff_factor * (2 ** (attempt - 1))
 
     def _build_path(self, template, ogg_service=None, path_params=None):
         path_params = dict(path_params or {})
@@ -147,39 +191,27 @@ class OGGRestAPI:
             if data is None:
                 data = {}
             if isinstance(data, dict):
+                # Copy first so the caller's dict is never mutated.
+                data = dict(data)
                 for k, v in body_params.items():
                     if v is not None:
                         data[k] = v
             if not data:
                 data = None
 
-        # If caller asked to skip on existing resource, perform a raw request and handle 409 specially
+        # If caller asked to skip on existing resource, inspect the raw response and
+        # treat a 409 (already exists) as a no-op instead of an error. Routing through
+        # _request means this path inherits the same retry handling as normal calls.
         if if_exists == 'skip':
-            response = self.session.request(
-                method,
-                url,
-                auth=self.auth,
-                headers=self.headers,
-                params=params,
-                json=data,
-                verify=self.verify_ssl,
-                timeout=self.timeout
-            )
-
-            try:
-                parsed = response.json()
-            except ValueError:
-                parsed = response.text
+            response = self._request(method, path, params=params, data=data, raw_response=True)
+            parsed = self._parse(response)
 
             if response.status_code == 409:
                 titles = []
-                try:
-                    msgs = parsed.get('messages', []) if isinstance(parsed, dict) else []
-                    for m in msgs:
-                        if isinstance(m, dict) and 'title' in m:
+                if isinstance(parsed, dict):
+                    for m in parsed.get('messages', []):
+                        if isinstance(m, dict) and m.get('title'):
                             titles.append(m['title'])
-                except Exception:
-                    pass
                 message = '; '.join(titles) if titles else 'Resource exists'
                 print(f"{message} (if_exists set to skip)")
                 return {'status': 'skipped', 'message': message, 'http_status': 409, 'raw': parsed}
