@@ -34,7 +34,9 @@ class OGGRestAPI:
         :param username: service username
         :param password: service password. If omitted, the user is prompted to
                          enter it securely (input is not echoed).
-        :param deployment: when reverse proxy is used, the deployment name to use (e.g. 'ogg_test_01')
+        :param deployment: deployment name to route to (e.g. 'ogg_test_01'). Requires
+                           reverse_proxy=True. Without a reverse proxy the deployment is
+                           selected by the port in `url`, so passing it here raises ValueError.
         :param ca_cert: path to a trusted CA cert (for self-signed certs)
         :param reverse_proxy: bool, whether to use NGINX reverse proxy
         :param verify_ssl: bool, whether to verify SSL certs
@@ -51,6 +53,18 @@ class OGGRestAPI:
         self.headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
         self.deployment = deployment
         self.reverse_proxy = reverse_proxy
+        if deployment and not reverse_proxy:
+            # Without a reverse proxy every microservice listens on its own port and the
+            # URL space is flat (/services/v2/...), so a deployment name has nowhere to go:
+            # the deployment is selected by the port in base_url. Accepting it silently
+            # would send the call to whatever base_url points at, typically the Service
+            # Manager, while the caller believes it reached the deployment.
+            raise ValueError(
+                f"deployment={deployment!r} requires reverse_proxy=True. Without a reverse "
+                f"proxy the deployment is selected by the port in the URL (the deployment's "
+                f"own adminsrvr port, e.g. 7810), not by name. Either pass reverse_proxy=True, "
+                f"or drop deployment and point url at the deployment's service port."
+            )
         self.verify_ssl = ca_cert if ca_cert else verify_ssl
         self.timeout = timeout
         self.session = requests.Session()
@@ -13158,21 +13172,31 @@ class OGGRestAPI:
     def start_extract(
         self,
         extract,
+        begin=None,
         raw_response=False,
     ):
         """Start an extract by updating its status to running.
 
         Args:
             extract (str): Name of the extract to start.
+            begin (optional): Starting point for data processing, forwarded verbatim
+                to the API. When None (default) the extract starts from its current
+                position. Accepts "now", an ISO timestamp string, or a position
+                object. The 'at' vs 'after' key selects ATCSN (inclusive) vs
+                AFTERCSN (exclusive), e.g. {'at': 6488359} or {'after': 6488359};
+                integrated-mode SCN uses a nested csn key, e.g. {'at': {'csn': N}}.
             raw_response (bool, optional): If True, return the raw API response.
                 Defaults to False.
 
         Returns:
             The result of the update_extract API call.
         """
+        data = {'status': 'running'}
+        if begin is not None:
+            data['begin'] = begin
         return self.update_extract(
             extract=extract,
-            data={'status': 'running'},
+            data=data,
             raw_response=raw_response
         )
 
@@ -13250,21 +13274,31 @@ class OGGRestAPI:
     def start_replicat(
         self,
         replicat,
+        begin=None,
         raw_response=False,
     ):
         """Start a replicat by updating its status to running.
 
         Args:
             replicat (str): Name of the replicat to start.
+            begin (optional): Starting point for data processing, forwarded verbatim
+                to the API. When None (default) the replicat starts from its current
+                position. Accepts "now", an ISO timestamp string, or a position
+                object. The 'at' vs 'after' key selects ATCSN (inclusive) vs
+                AFTERCSN (exclusive), e.g. {'at': 6488359} or {'after': 6488359};
+                a trail position uses {'sequence': N, 'offset': N}.
             raw_response (bool, optional): If True, return the raw API response.
                 Defaults to False.
 
         Returns:
             The result of the update_replicat API call.
         """
+        data = {'status': 'running'}
+        if begin is not None:
+            data['begin'] = begin
         return self.update_replicat(
             replicat=replicat,
-            data={'status': 'running'},
+            data=data,
             raw_response=raw_response
         )
 
@@ -13342,21 +13376,29 @@ class OGGRestAPI:
     def start_distribution_path(
         self,
         distpath,
+        begin=None,
         raw_response=False,
     ):
         """Start a distribution path by updating its status to running.
 
         Args:
             distpath (str): Name of the distribution path to start.
+            begin (optional): Starting point for data processing, forwarded verbatim
+                to the API. When None (default) the path starts from its current
+                position. Accepts "now", an ISO timestamp string, or a position
+                object (same 'at'/'after' CSN semantics as start_extract).
             raw_response (bool, optional): If True, return the raw API response.
                 Defaults to False.
 
         Returns:
             The result of the update_distribution_path API call.
         """
+        data = {'status': 'running'}
+        if begin is not None:
+            data['begin'] = begin
         return self.update_distribution_path(
             distpath=distpath,
-            data={'status': 'running'},
+            data=data,
             raw_response=raw_response
         )
 
@@ -13466,15 +13508,16 @@ class OGGRestAPI:
             raw_response=raw_response
         )
 
-    def _wait_until_resource_running(
+    def _wait_until_resource_status(
         self,
         fetch_fn,
         resource_type,
         resource_name,
         sleep_seconds=5,
         max_retries=10,
+        target_status="running",
     ):
-        """Wait until a resource reports status 'running' by repeatedly calling the provided fetch function.
+        """Wait until a resource reports the target status by repeatedly calling the provided fetch function.
 
         Args:
             fetch_fn (function): Method that fetches the resource and returns its details as a dict.
@@ -13483,27 +13526,37 @@ class OGGRestAPI:
             resource_name (str): Name of the resource to wait for.
             sleep_seconds (int, optional): Number of seconds to sleep between retries. Defaults to 5.
             max_retries (int, optional): Maximum number of retries. Defaults to 10.
+            target_status (str, optional): Status to wait for. Defaults to "running".
 
         Raises:
-            RuntimeError: If the resource does not become running after the maximum number of retries.
+            RuntimeError: If the resource does not reach the target status after the maximum number of
+                retries, or if it reports 'abended' while the target status is not 'abended'.
 
         Returns:
-            dict: The resource if it becomes running, otherwise raises an error.
+            dict: The resource once it reaches the target status, otherwise raises an error.
         """
         for attempt in range(1, max_retries + 1):
             try:
                 resource = fetch_fn()
                 status = resource.get("status")
-                if status == "running":
+                if status == target_status:
                     print(
-                        f"{resource_type.capitalize()} '{resource_name}' is running. Continuing..."
+                        f"{resource_type.capitalize()} '{resource_name}' is '{target_status}'. Continuing..."
                     )
                     return resource
+
+                if status == "abended" and target_status != "abended":
+                    raise RuntimeError(
+                        f"{resource_type.capitalize()} '{resource_name}' abended while waiting for "
+                        f"status '{target_status}'."
+                    )
 
                 print(
                     f"{resource_type.capitalize()} '{resource_name}' status is '{status}' "
                     f"(attempt {attempt}/{max_retries}). Retrying in {sleep_seconds}s..."
                 )
+            except RuntimeError:
+                raise
             except Exception as exc:
                 print(
                     f"Error fetching {resource_type} '{resource_name}': {exc}. "
@@ -13514,107 +13567,119 @@ class OGGRestAPI:
                 time.sleep(sleep_seconds)
 
         raise RuntimeError(
-            f"{resource_type.capitalize()} '{resource_name}' did not become running after "
+            f"{resource_type.capitalize()} '{resource_name}' did not reach status '{target_status}' after "
             f"{max_retries} retries."
         )
 
-    def wait_until_deployment_running(
+    def wait_until_deployment_status(
         self,
         deployment,
         sleep_seconds=5,
         max_retries=10,
+        target_status="running",
     ):
-        """Wait until a deployment reports status 'running'.
+        """Wait until a deployment reports the target status (default 'running').
 
         Args:
             deployment (str): Name of the deployment to wait for.
             sleep_seconds (int, optional): Number of seconds to sleep between retries. Defaults to 5.
             max_retries (int, optional): Maximum number of retries. Defaults to 10.
+            target_status (str, optional): Status to wait for. Defaults to "running".
 
         Returns:
-            dict: The deployment resource if it becomes running, otherwise raises an error.
+            dict: The deployment resource once it reaches the target status, otherwise raises an error.
         """
-        return self._wait_until_resource_running(
+        return self._wait_until_resource_status(
             lambda: self.get_deployment(deployment),
             "deployment",
             deployment,
             sleep_seconds,
             max_retries,
+            target_status,
         )
 
-    def wait_until_extract_running(
+    def wait_until_extract_status(
         self,
         extract,
         sleep_seconds=5,
         max_retries=10,
+        target_status="running",
     ):
-        """Wait until an extract reports status 'running'.
+        """Wait until an extract reports the target status (default 'running').
 
         Args:
             extract (str): Name of the extract to wait for.
             sleep_seconds (int, optional): Number of seconds to sleep between retries. Defaults to 5.
             max_retries (int, optional): Maximum number of retries. Defaults to 10.
+            target_status (str, optional): Status to wait for. Defaults to "running".
 
         Returns:
-            dict: The extract resource if it becomes running, otherwise raises an error.
+            dict: The extract resource once it reaches the target status, otherwise raises an error.
         """
-        return self._wait_until_resource_running(
+        return self._wait_until_resource_status(
             lambda: self.get_extract(extract),
             "extract",
             extract,
             sleep_seconds,
             max_retries,
+            target_status,
         )
 
-    def wait_until_replicat_running(
+    def wait_until_replicat_status(
         self,
         replicat,
         sleep_seconds=5,
         max_retries=10,
+        target_status="running",
     ):
-        """Wait until a replicat reports status 'running'.
+        """Wait until a replicat reports the target status (default 'running').
 
         Args:
             replicat (str): Name of the replicat to wait for.
             sleep_seconds (int, optional): Number of seconds to sleep between retries. Defaults to 5.
             max_retries (int, optional): Maximum number of retries. Defaults to 10.
+            target_status (str, optional): Status to wait for. Defaults to "running".
 
         Returns:
-            dict: The replicat resource if it becomes running, otherwise raises an error.
+            dict: The replicat resource once it reaches the target status, otherwise raises an error.
         """
-        return self._wait_until_resource_running(
+        return self._wait_until_resource_status(
             lambda: self.get_replicat(replicat),
             "replicat",
             replicat,
             sleep_seconds,
             max_retries,
+            target_status,
         )
 
-    def wait_until_service_running(
+    def wait_until_service_status(
         self,
         deployment,
         service,
         sleep_seconds=5,
         max_retries=10,
+        target_status="running",
     ):
-        """Wait until a service reports status 'running'.
+        """Wait until a service reports the target status (default 'running').
 
         Args:
             deployment (str): Name of the deployment owning the service.
             service (str): Name of the service to wait for.
             sleep_seconds (int, optional): Number of seconds to sleep between retries. Defaults to 5.
             max_retries (int, optional): Maximum number of retries. Defaults to 10.
+            target_status (str, optional): Status to wait for. Defaults to "running".
 
         Returns:
-            dict: The service resource if it becomes running, otherwise raises an error.
+            dict: The service resource once it reaches the target status, otherwise raises an error.
         """
 
-        return self._wait_until_resource_running(
+        return self._wait_until_resource_status(
             lambda: self.get_service(deployment, service),
             "service",
             f"{deployment}/{service}",
             sleep_seconds,
             max_retries,
+            target_status,
         )
 
     def patch_deployment(
@@ -13655,7 +13720,7 @@ class OGGRestAPI:
                 data={'status': 'restart'}
             )
 
-            self.wait_until_deployment_running(
+            self.wait_until_deployment_status(
                 deployment,
                 sleep_seconds=5,
                 max_retries=10,
@@ -13670,7 +13735,7 @@ class OGGRestAPI:
                     if service_name == "ServiceManager":
                         continue
 
-                    service_info = self.wait_until_service_running(
+                    service_info = self.wait_until_service_status(
                         "ServiceManager",
                         service_name,
                         sleep_seconds=5,
