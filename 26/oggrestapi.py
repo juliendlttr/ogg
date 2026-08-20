@@ -9,6 +9,7 @@ import requests
 import time
 import urllib3
 from pprint import pprint
+from urllib.parse import urlparse
 
 
 class OGGRestAPI:
@@ -24,21 +25,28 @@ class OGGRestAPI:
     )
 
     def __init__(self, url, username=None, password=None, deployment=None, ca_cert=None,
-                 reverse_proxy=False, verify_ssl=True, test_connection=True, timeout=None, version='v2'):
+                 reverse_proxy=False, auto_discovery=False, verify_ssl=True, test_connection=True,
+                 timeout=None, version='v2'):
         """
         Initialize Oracle GoldenGate REST API client.
 
         :param url: Base URL of the OGG REST API. It can be:
                     'http(s)://hostname:port' without NGINX reverse proxy,
-                    'https://nginx_host:nginx_port' with NGINX reverse proxy.
+                    'https://nginx_host:nginx_port' with NGINX reverse proxy,
+                    or the Service Manager's own 'http(s)://hostname:port' with auto_discovery=True.
         :param username: service username
         :param password: service password. If omitted, the user is prompted to
                          enter it securely (input is not echoed).
         :param deployment: deployment name to route to (e.g. 'ogg_test_01'). Requires
-                           reverse_proxy=True. Without a reverse proxy the deployment is
-                           selected by the port in `url`, so passing it here raises ValueError.
+                           reverse_proxy=True or auto_discovery=True. Without either, the
+                           deployment is selected by the port in `url`, so passing it here
+                           raises ValueError.
         :param ca_cert: path to a trusted CA cert (for self-signed certs)
         :param reverse_proxy: bool, whether to use NGINX reverse proxy
+        :param auto_discovery: bool, reach every microservice of `deployment` from a single
+                              client pointed at the Service Manager, without a reverse proxy,
+                              by looking up each service's own port on first use. Mutually
+                              exclusive with reverse_proxy.
         :param verify_ssl: bool, whether to verify SSL certs
         :param test_connection: if True, will attempt to retrieve API versions on init
         :param timeout: request timeout in seconds
@@ -53,17 +61,23 @@ class OGGRestAPI:
         self.headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
         self.deployment = deployment
         self.reverse_proxy = reverse_proxy
-        if deployment and not reverse_proxy:
-            # Without a reverse proxy every microservice listens on its own port and the
-            # URL space is flat (/services/v2/...), so a deployment name has nowhere to go:
-            # the deployment is selected by the port in base_url. Accepting it silently
-            # would send the call to whatever base_url points at, typically the Service
-            # Manager, while the caller believes it reached the deployment.
+        self.auto_discovery = auto_discovery
+        # (deployment, service name) -> its own discovered base_url, filled in lazily by
+        # _service_base_url() the first time each deployment/service pair is actually used.
+        self._service_urls = {}
+        if reverse_proxy and auto_discovery:
+            raise ValueError("reverse_proxy and auto_discovery are mutually exclusive. Pick one.")
+        if deployment and not reverse_proxy and not auto_discovery:
+            # Without a reverse proxy or auto-discovery, every microservice listens on its own
+            # port and the URL space is flat (/services/v2/...), so a deployment name has
+            # nowhere to go: the deployment is selected by the port in base_url. Accepting it
+            # silently would send the call to whatever base_url points at, typically the
+            # Service Manager, while the caller believes it reached the deployment.
             raise ValueError(
-                f"deployment={deployment!r} requires reverse_proxy=True. Without a reverse "
-                f"proxy the deployment is selected by the port in the URL (the deployment's "
-                f"own adminsrvr port, e.g. 7810), not by name. Either pass reverse_proxy=True, "
-                f"or drop deployment and point url at the deployment's service port."
+                f"deployment={deployment!r} requires reverse_proxy=True or auto_discovery=True. "
+                f"Without either, the deployment is selected by the port in the URL (the "
+                f"deployment's own adminsrvr port, e.g. 7810), not by name. Either pass one of "
+                f"them, or drop deployment and point url at the deployment's service port."
             )
         self.verify_ssl = ca_cert if ca_cert else verify_ssl
         self.timeout = timeout
@@ -77,8 +91,13 @@ class OGGRestAPI:
         # Test connection
         if test_connection:
             # Verify connectivity and credentials. Raises on failure so callers can
-            # catch and handle connection issues gracefully.
-            resp = self.list_roles(raw_response=True)
+            # catch and handle connection issues gracefully. Under auto_discovery, base_url
+            # is the Service Manager, which has no list_roles endpoint (adminsrvr-only), so
+            # its health check endpoint is used instead.
+            if auto_discovery:
+                resp = self.get_service_health_check(ogg_service='ServiceManager', raw_response=True)
+            else:
+                resp = self.list_roles(raw_response=True)
             if resp.status_code == 200:
                 print(f'Connected to OGG REST API at {self.base_url}')
             elif resp.status_code == 403:
@@ -92,7 +111,35 @@ class OGGRestAPI:
                     f"HTTP {resp.status_code}: {resp.text}"
                 )
 
-    def _request(self, method, path, *, params=None, data=None, max_retries=3,
+    def _service_base_url(self, ogg_service):
+        """Resolve the base_url a request for `ogg_service` should actually go to.
+
+        Outside auto_discovery this is always just self.base_url. Under
+        auto_discovery, self.base_url is the Service Manager, and a
+        per-deployment service's real host:port is looked up through it and
+        cached, keyed on (deployment, ogg_service) since self.deployment can
+        change on an existing client (patch_deployment loops over several).
+        ServiceManager itself and the no-specific-service case stay on base_url.
+        """
+        if not self.auto_discovery or not ogg_service or ogg_service == 'ServiceManager' or not self.deployment:
+            return self.base_url
+        cache_key = (self.deployment, ogg_service)
+        if cache_key not in self._service_urls:
+            service = self.get_service(deployment=self.deployment, service=ogg_service)
+            network = ((service or {}).get('config') or {}).get('network') or {}
+            ports = network.get('serviceListeningPort') or []
+            if not ports:
+                raise RuntimeError(
+                    f"auto_discovery could not find a listening port for service {ogg_service!r} "
+                    f"in deployment {self.deployment!r} (checked via the Service Manager at "
+                    f"{self.base_url})"
+                )
+            scheme = self.base_url.split('://', 1)[0]
+            host = urlparse(self.base_url).hostname
+            self._service_urls[cache_key] = f"{scheme}://{host}:{ports[0]['port']}"
+        return self._service_urls[cache_key]
+
+    def _request(self, method, path, *, ogg_service=None, params=None, data=None, max_retries=3,
                  backoff_factor=1.0, raw_response=False):
         """Make an HTTP request, retrying transient failures, then parse the response.
 
@@ -104,6 +151,8 @@ class OGGRestAPI:
         Args:
             method (str): The HTTP method to use.
             path (str): The API endpoint path.
+            ogg_service (str, optional): Service this request targets, used to resolve
+                the right host:port under auto_discovery. Defaults to None.
             params (dict, optional): Query parameters for the request. Defaults to None.
             data (dict, optional): The request body data. Defaults to None.
             max_retries (int, optional): Maximum number of attempts. Defaults to 3.
@@ -114,7 +163,7 @@ class OGGRestAPI:
         Returns:
             dict or requests.Response: The parsed response or the raw response object.
         """
-        url = f'{self.base_url}{path}'
+        url = f'{self._service_base_url(ogg_service)}{path}'
         response = None
         last_exc = None
         for attempt in range(1, max_retries + 1):
@@ -190,11 +239,11 @@ class OGGRestAPI:
 
     def _call(self, method, template, *, ogg_service=None, path_params=None, params=None,
               data=None, body_params=None, raw_response=False, if_exists='fail'):
-        if self.reverse_proxy and ogg_service == '' and self.deployment:
+        if (self.reverse_proxy or self.auto_discovery) and ogg_service == '' and self.deployment:
             # This is a common endpoint and a deployment is specified. Choosing adminsrvr service by default.
             ogg_service = "adminsrvr"
         path = self._build_path(template, ogg_service=ogg_service, path_params=path_params)
-        url = f'{self.base_url}{path}'
+        url = f'{self._service_base_url(ogg_service)}{path}'
 
         # Merge body_params into data when provided. body_params is a dict mapping
         # payload field names to values (the generated methods pass their
@@ -215,7 +264,7 @@ class OGGRestAPI:
         # treat a 409 (already exists) as a no-op instead of an error. Routing through
         # _request means this path inherits the same retry handling as normal calls.
         if if_exists == 'skip':
-            response = self._request(method, path, params=params, data=data, raw_response=True)
+            response = self._request(method, path, ogg_service=ogg_service, params=params, data=data, raw_response=True)
             parsed = self._parse(response)
 
             if response.status_code == 409:
@@ -235,7 +284,7 @@ class OGGRestAPI:
             return self._extract_main(parsed)
 
         # Default behavior: use existing request flow
-        result = self._request(method, path, params=params, data=data, raw_response=raw_response)
+        result = self._request(method, path, ogg_service=ogg_service, params=params, data=data, raw_response=raw_response)
         return result
 
     def _get(self, path, params=None, raw_response=False):
@@ -13169,6 +13218,40 @@ class OGGRestAPI:
             raw_response=raw_response
         )
 
+    def restart_deployment(
+        self,
+        deployment,
+        only_if_running=False,
+        raw_response=False,
+    ):
+        """Restart a deployment by updating its status to restart.
+
+        Args:
+            deployment (str): Name of the deployment to restart.
+            only_if_running (bool, optional): If True, only restart the deployment if it is currently
+                running. Defaults to False.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the update_deployment API call, or None if the deployment was not restarted
+            because it was not running and only_if_running is True.
+        """
+        if only_if_running:
+            deployment_status = self.get_deployment(deployment).get("status")
+            if deployment_status != "running":
+                print(
+                    f"Skipping restart of deployment '{deployment}' "
+                    f"because it is not running (status={deployment_status})."
+                )
+                return
+
+        return self.update_deployment(
+            deployment=deployment,
+            data={'status': 'restart'},
+            raw_response=raw_response
+        )
+
     def start_extract(
         self,
         extract,
@@ -13686,8 +13769,8 @@ class OGGRestAPI:
         self,
         deployment,
         new_home,
-        restart_deployment=True,
-        restart_processes=True,
+        restart_after_patch=True,
+        restart_processes_after_patch=True,
         ask_credentials=False,
     ):
         """Patch GoldenGate deployment with new home and optionally restart services and processes.
@@ -13696,8 +13779,9 @@ class OGGRestAPI:
         Args:
             deployment (str): Name of the deployment to patch.
             new_home (str): Path to the new GoldenGate home.
-            restart_deployment (bool, optional): Whether to restart the deployment. Defaults to True.
-            restart_processes (bool, optional): Whether to restart extracts and replicats. Defaults to True.
+            restart_after_patch (bool, optional): Whether to restart the deployment. Defaults to True.
+            restart_processes_after_patch (bool, optional): Whether to restart extracts and replicats.
+                Defaults to True.
             ask_credentials (bool, optional): Whether to ask for credentials for the deployment. Defaults to False.
         """
         print(f"Fetching deployment '{deployment}'...")
@@ -13713,12 +13797,20 @@ class OGGRestAPI:
         )
         print(f"Successfully updated home for deployment '{deployment}'.")
 
-        if restart_deployment:
+        if restart_after_patch:
+            # Snapshot which services were running before the restart. A service that was
+            # never running to begin with (e.g. pluginsrvr, which is not started by default)
+            # would otherwise make wait_until_service_status below time out and raise,
+            # aborting the whole patch instead of simply being skipped like a stopped one.
+            services_before = {}
+            if deployment == "ServiceManager":
+                services_before = {
+                    service.get("name"): service.get("status")
+                    for service in self.list_services("ServiceManager")
+                }
+
             print(f"Restarting deployment '{deployment}' to apply new home...")
-            self.update_deployment(
-                deployment=deployment,
-                data={'status': 'restart'}
-            )
+            self.restart_deployment(deployment)
 
             self.wait_until_deployment_status(
                 deployment,
@@ -13729,40 +13821,37 @@ class OGGRestAPI:
             # For the Service Manager deployment, we restart all services except the Service Manager service itself.
             # The reason is that the services like the AIService do not pick up the new home automatically.
             if deployment == "ServiceManager":
-                services = self.list_services("ServiceManager")
-                for service in services:
-                    service_name = service.get("name")
+                for service_name, status_before in services_before.items():
                     if service_name == "ServiceManager":
                         continue
 
-                    service_info = self.wait_until_service_status(
+                    if status_before != "running":
+                        print(
+                            f"Skipping restart of service '{service_name}' in deployment 'ServiceManager'"
+                            f" because it was not running before the patch (status={status_before})."
+                        )
+                        continue
+
+                    self.wait_until_service_status(
                         "ServiceManager",
                         service_name,
                         sleep_seconds=5,
                         max_retries=10,
                     )
-                    service_status = service_info.get("status")
-                    if service_status != "running":
-                        print(
-                            f"Skipping restart of service '{service_name}' in deployment 'ServiceManager'"
-                            f" because it is not running (status={service_status})."
-                        )
-                        continue
-                    else:
-                        print(f"Restarting service '{service_name}' in deployment 'ServiceManager'...")
-                        self.restart_service(
-                            deployment="ServiceManager",
-                            service=service_name,
-                            only_if_running=False
-                        )
+                    print(f"Restarting service '{service_name}' in deployment 'ServiceManager'...")
+                    self.restart_service(
+                        deployment="ServiceManager",
+                        service=service_name,
+                        only_if_running=False
+                    )
 
         else:
             print(
-                f"Skipping deployment restart for deployment '{deployment}' because restart_deployment=False. "
+                f"Skipping deployment restart for deployment '{deployment}' because restart_after_patch=False. "
                 "You should restart the deployment manually to use the new home.")
 
         if deployment != "ServiceManager":
-            if restart_processes:
+            if restart_processes_after_patch:
                 if ask_credentials:
                     deployment_username = input(f"Enter username for deployment '{deployment}': ")
                     deployment_password = getpass.getpass(prompt=f"Enter password for deployment '{deployment}': ")
@@ -13770,7 +13859,7 @@ class OGGRestAPI:
                     self.auth = (deployment_username, deployment_password)
 
                 old_deployment = self.deployment
-                self.deployment = deployment  # Set deployment for reverse proxy auth
+                self.deployment = deployment  # Route to this deployment (reverse_proxy or auto_discovery)
 
                 try:
                     extracts = self.list_extracts()
@@ -13816,7 +13905,8 @@ class OGGRestAPI:
 
             else:
                 print(
-                    f"Skipping process restarts for deployment '{deployment}' because restart_processes=False. "
+                    f"Skipping process restarts for deployment '{deployment}' because "
+                    "restart_processes_after_patch=False. "
                     "You should restart the processes manually to use the new home.")
 
         print(f"Finished patching deployment '{deployment}'.")
@@ -13824,45 +13914,47 @@ class OGGRestAPI:
     def patch_deployments(
         self,
         new_home,
-        restart_deployment=True,
-        restart_processes=True,
+        restart_after_patch=True,
+        restart_processes_after_patch=True,
         ask_credentials=None,
     ):
         """Patch GoldenGate deployments
 
         Args:
             new_home (str): Path to the new GoldenGate home.
-            restart_deployment (bool, optional): Whether to restart the deployment. Defaults to True.
-            restart_processes (bool, optional): Whether to restart extracts and replicats. Defaults to True.
+            restart_after_patch (bool, optional): Whether to restart the deployment. Defaults to True.
+            restart_processes_after_patch (bool, optional): Whether to restart extracts and replicats.
+                Defaults to True.
             ask_credentials (bool, optional): Whether to ask for credentials for each deployment. Defaults to None.
         """
         print("Listing deployments...")
         deployments = self.list_deployments()
 
-        if restart_processes:
-            if not self.reverse_proxy and restart_processes:
+        if restart_processes_after_patch:
+            if not self.reverse_proxy and not self.auto_discovery:
                 raise ValueError(
-                    "Cannot restart extracts and replicats when reverse_proxy is False because the API client "
-                    "is not aware of the port information for all deployments. Please set restart_processes=False,"
-                    " try again and restart the extracts and replicats manually with another client connection to "
-                    "the deployments after patching the homes."
+                    "Cannot restart extracts and replicats when neither reverse_proxy nor auto_discovery "
+                    "is enabled, because the API client is not aware of the port information for all "
+                    "deployments. Please set restart_processes_after_patch=False, try again and restart "
+                    "the extracts and replicats manually with another client connection to the "
+                    "deployments after patching the homes."
                 )
 
             if len(deployments) > 2:
                 if ask_credentials is None:
                     raise ValueError(
-                        "More than two deployments detected and restart_processes is True."
+                        "More than two deployments detected and restart_processes_after_patch is True."
                         " It is not possible to restart extracts and replicats without knowing "
                         "credentials for all the deployments. Either set ask_credentials=True "
                         "to be prompted for credentials for each deployment, or ask_credentials=False"
                         " to use the same credentials for all deployments. If you are not using a reverse "
-                        "proxy setup, you cannot restart extracts and replicats automatically with this "
-                        "method, and will need to open connections to each deployment separately to restart "
-                        "the processes after patching the homes."
+                        "proxy or auto_discovery setup, you cannot restart extracts and replicats "
+                        "automatically with this method, and will need to open connections to each "
+                        "deployment separately to restart the processes after patching the homes."
                     )
                 else:
                     print(
-                        "More than two deployments detected and restart_processes is True. "
+                        "More than two deployments detected and restart_processes_after_patch is True. "
                         f"ask_credentials is set to {ask_credentials}. "
                         "Proceeding with patching deployments and restarting processes using "
                         "individual credentials for each deployment."
@@ -13874,8 +13966,8 @@ class OGGRestAPI:
         self.patch_deployment(
             deployment="ServiceManager",
             new_home=new_home,
-            restart_deployment=restart_deployment,
-            restart_processes=False
+            restart_after_patch=restart_after_patch,
+            restart_processes_after_patch=False
         )
 
         for deployment in deployments:
@@ -13888,7 +13980,7 @@ class OGGRestAPI:
             self.patch_deployment(
                 deployment=deployment_name,
                 new_home=new_home,
-                restart_deployment=restart_deployment,
-                restart_processes=restart_processes,
+                restart_after_patch=restart_after_patch,
+                restart_processes_after_patch=restart_processes_after_patch,
                 ask_credentials=ask_credentials
             )
