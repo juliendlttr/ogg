@@ -1,27 +1,38 @@
-# Oracle GoldenGate Repository
-This repository contains a collection of tools for Oracle GoldenGate.
+# oggrestapi
 
-## GoldenGate API Client
-In each version directory, you will find a Python API client generated from the `swagger.json` specification for that version of GoldenGate. These clients provide a convenient way to interact with the GoldenGate REST API in Python.
+A Python client for the Oracle GoldenGate REST API.
 
-### Usage Example
+## Install
+
+```bash
+pip install .
+```
+
+## Usage
+
 ```python
 from oggrestapi import OGGRestAPI
-
-# Initialize the client
-ogg_client = OGGRestAPI(
-    url="https://vmogg:7810",
-    username="ogg",
-    password="password"
-)
 
 # Initialize the client when using a reverse proxy
 ogg_client = OGGRestAPI(
     url="https://vmogg",
     username="ogg",
-    password="password",
     deployment="ogg_test_01",
     reverse_proxy=True
+)
+
+# Initialize the client with auto-discovery, when using the same credentials for all services
+ogg_client = OGGRestAPI(
+    url="https://vmogg:7809",
+    username="ogg",
+    deployment="ogg_test_01",
+    auto_discovery=True
+)
+
+# Initialize the client against a single service
+ogg_client = OGGRestAPI(
+    url="https://vmogg:7810",
+    username="ogg"
 )
 
 # Example: Get a list of all extracts

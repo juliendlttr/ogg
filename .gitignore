@@ -1,7 +1,7 @@
-*.py
-*.json
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
 *.pem
-*pycache*
-*/*.pem
-*call*
-*basic*

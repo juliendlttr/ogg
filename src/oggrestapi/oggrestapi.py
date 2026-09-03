@@ -6,6 +6,7 @@ Author: Julien DELATTRE
 
 import getpass
 import requests
+import sys
 import time
 import urllib3
 from pprint import pprint
@@ -26,7 +27,7 @@ class OGGRestAPI:
 
     def __init__(self, url, username=None, password=None, deployment=None, ca_cert=None,
                  reverse_proxy=False, auto_discovery=False, verify_ssl=True, test_connection=True,
-                 timeout=None, version='v2'):
+                 timeout=None, version='v2', verbose=False):
         """
         Initialize Oracle GoldenGate REST API client.
 
@@ -50,8 +51,11 @@ class OGGRestAPI:
         :param verify_ssl: bool, whether to verify SSL certs
         :param test_connection: if True, will attempt to retrieve API versions on init
         :param timeout: request timeout in seconds
+        :param verbose: if True, print a confirmation line to stderr once the connection
+                        test succeeds. Off by default so scripts built on this client
+                        stay quiet unless asked to be chatty.
         """
-        self.swagger_version = '2025.01.20'
+        self.swagger_version = '2026.01.27'
         self.version = version
         self.base_url = url
         self.username = username
@@ -99,7 +103,11 @@ class OGGRestAPI:
             else:
                 resp = self.list_roles(raw_response=True)
             if resp.status_code == 200:
-                print(f'Connected to OGG REST API at {self.base_url}')
+                if verbose:
+                    # stderr, not stdout: callers that pipe this client's owning
+                    # script's stdout as machine-readable output (e.g. consumed by
+                    # a subprocess) must not get this line mixed into it.
+                    print(f'Connected to OGG REST API at {self.base_url}', file=sys.stderr)
             elif resp.status_code == 403:
                 raise RuntimeError(
                     f"Authentication failed connecting to OGG REST API at {self.base_url} "
@@ -127,8 +135,19 @@ class OGGRestAPI:
         if cache_key not in self._service_urls:
             service = self.get_service(deployment=self.deployment, service=ogg_service)
             network = ((service or {}).get('config') or {}).get('network') or {}
-            ports = network.get('serviceListeningPort') or []
-            if not ports:
+            ports = network.get('serviceListeningPort')
+            # Not the same shape across versions: 23ai/26ai's serviceListeningPort is
+            # a list of {"port": N} objects (possibly multiple listeners), 19c's is a
+            # bare integer - ports[0]['port'] raises TypeError: 'int' object is not
+            # subscriptable against a 19c deployment.
+            if isinstance(ports, int):
+                port = ports
+            elif isinstance(ports, list) and ports:
+                first = ports[0]
+                port = first['port'] if isinstance(first, dict) else first
+            else:
+                port = None
+            if not port:
                 raise RuntimeError(
                     f"auto_discovery could not find a listening port for service {ogg_service!r} "
                     f"in deployment {self.deployment!r} (checked via the Service Manager at "
@@ -136,11 +155,11 @@ class OGGRestAPI:
                 )
             scheme = self.base_url.split('://', 1)[0]
             host = urlparse(self.base_url).hostname
-            self._service_urls[cache_key] = f"{scheme}://{host}:{ports[0]['port']}"
+            self._service_urls[cache_key] = f"{scheme}://{host}:{port}"
         return self._service_urls[cache_key]
 
     def _request(self, method, path, *, ogg_service=None, params=None, data=None, max_retries=3,
-                 backoff_factor=1.0, raw_response=False):
+                 backoff_factor=1.0, raw_response=False, content=False, content_type='text/plain'):
         """Make an HTTP request, retrying transient failures, then parse the response.
 
         Retries are attempted for transient network exceptions (connection errors,
@@ -159,11 +178,20 @@ class OGGRestAPI:
             backoff_factor (float, optional): Base delay (seconds) for exponential
                 backoff. Delay for attempt n is backoff_factor * 2**(n-1). Defaults to 1.0.
             raw_response (bool, optional): Whether to return the raw response object. Defaults to False.
+            content (bool, optional): If True, send Accept: `content_type` so the server returns
+                the actual log/file content instead of the metadata JSON it sends by default.
+                Returns the response body as text (`content_type='text/plain'`) or bytes
+                (any other `content_type`, e.g. 'application/binary'). Defaults to False.
+            content_type (str, optional): Accept header value to send when `content` is True.
+                Defaults to 'text/plain'.
 
         Returns:
-            dict or requests.Response: The parsed response or the raw response object.
+            dict, str, bytes or requests.Response: The parsed response, the raw content
+            (text or bytes, depending on `content_type`) when `content` is True, or the raw
+            response object when `raw_response` is True.
         """
         url = f'{self._service_base_url(ogg_service)}{path}'
+        headers = {'Accept': content_type} if content else None
         response = None
         last_exc = None
         for attempt in range(1, max_retries + 1):
@@ -174,6 +202,7 @@ class OGGRestAPI:
                     auth=self.auth,
                     params=params,
                     json=data,
+                    headers=headers,
                     verify=self.verify_ssl,
                     timeout=self.timeout
                 )
@@ -203,8 +232,10 @@ class OGGRestAPI:
 
         if raw_response:
             return response
-        result = self._parse(response)
         self._check_response(response, url)
+        if content:
+            return response.text if content_type == 'text/plain' else response.content
+        result = self._parse(response)
         return self._extract_main(result)
 
     def _retry_delay(self, attempt, backoff_factor, response=None):
@@ -231,14 +262,17 @@ class OGGRestAPI:
         #   - /services/ServiceManager/v2/... for Service Manager
         #   - /services/deployment_name/ogg_service/v2/... for other services when a deployment is specified
         if self.reverse_proxy and template != '/services':
+            # str.removeprefix() is 3.9+; this repo targets 3.6.8.
+            stripped = template[len('/services/'):] if template.startswith('/services/') else template
             if ogg_service == 'ServiceManager' or not self.deployment:
-                template = f'/services/ServiceManager/{template.removeprefix("/services/")}'
+                template = f'/services/ServiceManager/{stripped}'
             else:
-                template = f'/services/{self.deployment}/{ogg_service}/{template.removeprefix("/services/")}'
+                template = f'/services/{self.deployment}/{ogg_service}/{stripped}'
         return template.format(**path_params)
 
     def _call(self, method, template, *, ogg_service=None, path_params=None, params=None,
-              data=None, body_params=None, raw_response=False, if_exists='fail'):
+              data=None, body_params=None, raw_response=False, content=False,
+              content_type='text/plain', if_exists='fail'):
         if (self.reverse_proxy or self.auto_discovery) and ogg_service == '' and self.deployment:
             # This is a common endpoint and a deployment is specified. Choosing adminsrvr service by default.
             ogg_service = "adminsrvr"
@@ -284,7 +318,10 @@ class OGGRestAPI:
             return self._extract_main(parsed)
 
         # Default behavior: use existing request flow
-        result = self._request(method, path, ogg_service=ogg_service, params=params, data=data, raw_response=raw_response)
+        result = self._request(
+            method, path, ogg_service=ogg_service, params=params, data=data,
+            raw_response=raw_response, content=content, content_type=content_type
+        )
         return result
 
     def _get(self, path, params=None, raw_response=False):
@@ -416,9 +453,68 @@ class OGGRestAPI:
             raw_response=raw_response
         )
 
+    # Endpoint: /services/{version}/aiservice/models
+    def list_ai_service_models(
+        self,
+        raw_response=False
+    ):
+        """
+        Admin Server/AI Management
+        GET /services/{version}/aiservice/models
+        Required Role: Operator
+        Retrieve the AI Service Models.
+
+        Parameters:
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.list_ai_service_models()
+
+        """
+        return self._call(
+            method="GET",
+            template="/services/{version}/aiservice/models",
+            ogg_service="adminsrvr",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/aiservice/models/{model}
+    def get_ai_service_model(
+        self,
+        model,
+        raw_response=False
+    ):
+        """
+        Admin Server/AI Management
+        GET /services/{version}/aiservice/models/{model}
+        Required Role: Operator
+        Retrieve the details of an AI Model.
+
+        Parameters:
+            model (str): Name of the Model. Required. Example: model_example
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.get_ai_service_model(
+                model='model_example'
+            )
+        """
+        return self._call(
+            method="GET",
+            template="/services/{version}/aiservice/models/{model}",
+            path_params={
+                "model": model
+            },
+            ogg_service="adminsrvr",
+            raw_response=raw_response
+        )
+
     # Endpoint: /services/{version}/authorization
     def exchange_auth_code_for_token(
         self,
+        ogg_service='',
         raw_response=False
     ):
         """
@@ -428,16 +524,20 @@ class OGGRestAPI:
         Receives the authorization code and exchanges it for an access and id token
 
         Parameters:
+            ogg_service (str): The service name to use for the request. It is only needed when using a
+                reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.exchange_auth_code_for_token()
-
+            client.exchange_auth_code_for_token(
+                ogg_service='adminsrvr'
+            )
         """
         return self._call(
             method="GET",
             template="/services/{version}/authorization",
+            ogg_service=ogg_service,
             raw_response=raw_response
         )
 
@@ -501,7 +601,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/authorizations/{role}",
             path_params={
-                "role": role,
+                "role": role
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -573,11 +673,11 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/authorizations/{role}",
             path_params={
-                "role": role,
+                "role": role
             },
             data=data,
             body_params={
-                "users": users,
+                "users": users
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -617,7 +717,7 @@ class OGGRestAPI:
             template="/services/{version}/authorizations/{role}/{user}",
             path_params={
                 "role": role,
-                "user": user,
+                "user": user
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -666,7 +766,7 @@ class OGGRestAPI:
             template="/services/{version}/authorizations/{role}/{user}",
             path_params={
                 "role": role,
-                "user": user,
+                "user": user
             },
             data=data,
             ogg_service=ogg_service,
@@ -713,7 +813,7 @@ class OGGRestAPI:
             template="/services/{version}/authorizations/{role}/{user}",
             path_params={
                 "role": role,
-                "user": user,
+                "user": user
             },
             data=data,
             ogg_service=ogg_service,
@@ -755,7 +855,7 @@ class OGGRestAPI:
             template="/services/{version}/authorizations/{role}/{user}",
             path_params={
                 "role": role,
-                "user": user,
+                "user": user
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -795,7 +895,7 @@ class OGGRestAPI:
             template="/services/{version}/authorizations/{role}/{user}/info",
             path_params={
                 "role": role,
-                "user": user,
+                "user": user
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -861,7 +961,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/certificates/{type}",
             path_params={
-                "type": type,
+                "type": type
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -901,7 +1001,7 @@ class OGGRestAPI:
             template="/services/{version}/certificates/{type}/{certificate}",
             path_params={
                 "type": type,
-                "certificate": certificate,
+                "certificate": certificate
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -937,7 +1037,7 @@ class OGGRestAPI:
             template="/services/{version}/certificates/{type}/{certificate}/info",
             path_params={
                 "type": type,
-                "certificate": certificate,
+                "certificate": certificate
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -970,12 +1070,12 @@ class OGGRestAPI:
                         {
                             "type": "info",
                             "units": "seconds",
-                            "value": "0"
+                            "value": 0
                         },
                         {
                             "type": "critical",
                             "units": "seconds",
-                            "value": "5"
+                            "value": 5
                         }
                     ]
                 }
@@ -1049,7 +1149,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/config/files/{file}",
             path_params={
-                "file": file,
+                "file": file
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -1108,11 +1208,11 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/config/files/{file}",
             path_params={
-                "file": file,
+                "file": file
             },
             data=data,
             body_params={
-                "lines": lines,
+                "lines": lines
             },
             ogg_service=ogg_service,
             if_exists=if_exists,
@@ -1149,7 +1249,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/config/files/{file}",
             path_params={
-                "file": file,
+                "file": file
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -1205,11 +1305,11 @@ class OGGRestAPI:
             method="PUT",
             template="/services/{version}/config/files/{file}",
             path_params={
-                "file": file,
+                "file": file
             },
             data=data,
             body_params={
-                "lines": lines,
+                "lines": lines
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -1365,7 +1465,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/config/types/{type}",
             path_params={
-                "type": type,
+                "type": type
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -1415,11 +1515,11 @@ class OGGRestAPI:
                             "type": "array",
                             "items": {
                                 "type": "string",
-                                "minLength": "0",
-                                "maxLength": "4095"
+                                "minLength": 0,
+                                "maxLength": 4095
                             },
-                            "minItems": "0",
-                            "maxItems": "32767"
+                            "minItems": 0,
+                            "maxItems": 32767
                         }
                     },
                     "required": [
@@ -1433,7 +1533,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/config/types/{type}",
             path_params={
-                "type": type,
+                "type": type
             },
             data=data,
             ogg_service=ogg_service,
@@ -1471,7 +1571,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/config/types/{type}",
             path_params={
-                "type": type,
+                "type": type
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -1507,7 +1607,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/config/types/{type}/values",
             path_params={
-                "type": type,
+                "type": type
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -1548,7 +1648,7 @@ class OGGRestAPI:
             template="/services/{version}/config/types/{type}/values/{value}",
             path_params={
                 "type": type,
-                "value": value,
+                "value": value
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -1602,7 +1702,7 @@ class OGGRestAPI:
             template="/services/{version}/config/types/{type}/values/{value}",
             path_params={
                 "type": type,
-                "value": value,
+                "value": value
             },
             data=data,
             ogg_service=ogg_service,
@@ -1645,7 +1745,7 @@ class OGGRestAPI:
             template="/services/{version}/config/types/{type}/values/{value}",
             path_params={
                 "type": type,
-                "value": value,
+                "value": value
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -1697,7 +1797,7 @@ class OGGRestAPI:
             template="/services/{version}/config/types/{type}/values/{value}",
             path_params={
                 "type": type,
-                "value": value,
+                "value": value
             },
             data=data,
             ogg_service=ogg_service,
@@ -1758,7 +1858,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/connections/{connection}",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -1815,11 +1915,11 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/connections/{connection}",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             data=data,
             body_params={
-                "credentials": credentials,
+                "credentials": credentials
             },
             ogg_service="adminsrvr",
             if_exists=if_exists,
@@ -1853,7 +1953,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/connections/{connection}",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -1904,11 +2004,11 @@ class OGGRestAPI:
             method="PUT",
             template="/services/{version}/connections/{connection}",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             data=data,
             body_params={
-                "credentials": credentials,
+                "credentials": credentials
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -1941,7 +2041,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/connections/{connection}/activeTransactions",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -1974,7 +2074,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/connections/{connection}/databases",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2011,7 +2111,7 @@ class OGGRestAPI:
             template="/services/{version}/connections/{connection}/databases/{database}",
             path_params={
                 "connection": connection,
-                "database": database,
+                "database": database
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2052,7 +2152,7 @@ class OGGRestAPI:
             path_params={
                 "connection": connection,
                 "database": database,
-                "schema": schema,
+                "schema": schema
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2097,7 +2197,7 @@ class OGGRestAPI:
                 "connection": connection,
                 "database": database,
                 "schema": schema,
-                "table": table,
+                "table": table
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2137,7 +2237,7 @@ class OGGRestAPI:
                 table='table_example',
                 data={
                     "command": "set",
-                    "csn": "32036323",
+                    "csn": 32036323,
                     "source": "DBNORTH_PDB1"
                 }
             )
@@ -2149,7 +2249,7 @@ class OGGRestAPI:
                 "connection": connection,
                 "database": database,
                 "schema": schema,
-                "table": table,
+                "table": table
             },
             data=data,
             ogg_service="adminsrvr",
@@ -2176,7 +2276,7 @@ class OGGRestAPI:
             connection (str): Connection name. For each alias in the credential store, a connection with the
                 name 'domain.alias' exists. Required. Example: MYCONN
             operation (str): Required if not included in `data`. Example: operation_example
-            name (str): Required if not included in `data`. Example: name_example
+            name (str):  Example: name_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -2203,12 +2303,12 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/connections/{connection}/tables/checkpoint",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             data=data,
             body_params={
                 "operation": operation,
-                "name": name,
+                "name": name
             },
             ogg_service="adminsrvr",
             if_exists=if_exists,
@@ -2242,7 +2342,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/connections/{connection}/tables/heartbeat",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2300,7 +2400,7 @@ class OGGRestAPI:
             client.create_heartbeat_table(
                 connection='MYCONN',
                 data={
-                    "frequency": "30"
+                    "frequency": 30
                 }
             )
 
@@ -2313,14 +2413,14 @@ class OGGRestAPI:
                 db_unique_name=None,
                 partitioned=None,
                 target_only=None,
-                frequency='30'
+                frequency=30
             )
         """
         return self._call(
             method="POST",
             template="/services/{version}/connections/{connection}/tables/heartbeat",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             data=data,
             body_params={
@@ -2331,7 +2431,7 @@ class OGGRestAPI:
                 "dbUniqueName": db_unique_name,
                 "partitioned": partitioned,
                 "targetOnly": target_only,
-                "frequency": frequency,
+                "frequency": frequency
             },
             ogg_service="adminsrvr",
             if_exists=if_exists,
@@ -2387,7 +2487,7 @@ class OGGRestAPI:
             client.update_heartbeat_table(
                 connection='MYCONN',
                 data={
-                    "purgeFrequency": "7"
+                    "purgeFrequency": 7
                 }
             )
 
@@ -2395,7 +2495,7 @@ class OGGRestAPI:
                 connection='MYCONN',
                 upgrade=None,
                 tracking_extract_restart=None,
-                purge_frequency='7',
+                purge_frequency=7,
                 retention_time=None,
                 db_unique_name=None,
                 partitioned=None,
@@ -2407,7 +2507,7 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/connections/{connection}/tables/heartbeat",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             data=data,
             body_params={
@@ -2418,7 +2518,7 @@ class OGGRestAPI:
                 "dbUniqueName": db_unique_name,
                 "partitioned": partitioned,
                 "targetOnly": target_only,
-                "frequency": frequency,
+                "frequency": frequency
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2451,7 +2551,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/connections/{connection}/tables/heartbeat",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2488,7 +2588,7 @@ class OGGRestAPI:
             template="/services/{version}/connections/{connection}/tables/heartbeat/{process}",
             path_params={
                 "connection": connection,
-                "process": process,
+                "process": process
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2525,7 +2625,7 @@ class OGGRestAPI:
             template="/services/{version}/connections/{connection}/tables/heartbeat/{process}",
             path_params={
                 "connection": connection,
-                "process": process,
+                "process": process
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2558,7 +2658,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/connections/{connection}/tables/heartbeatData",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2604,11 +2704,11 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/connections/{connection}/trandata/procedure",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             data=data,
             body_params={
-                "operation": operation,
+                "operation": operation
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2647,7 +2747,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/connections/{connection}/trandata/schema",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             data=data,
             ogg_service="adminsrvr",
@@ -2688,7 +2788,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/connections/{connection}/trandata/table",
             path_params={
-                "connection": connection,
+                "connection": connection
             },
             data=data,
             ogg_service="adminsrvr",
@@ -2777,7 +2877,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/credentials/{domain}",
             path_params={
-                "domain": domain,
+                "domain": domain
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2814,7 +2914,7 @@ class OGGRestAPI:
             template="/services/{version}/credentials/{domain}/{alias}",
             path_params={
                 "domain": domain,
-                "alias": alias,
+                "alias": alias
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2871,12 +2971,12 @@ class OGGRestAPI:
             template="/services/{version}/credentials/{domain}/{alias}",
             path_params={
                 "domain": domain,
-                "alias": alias,
+                "alias": alias
             },
             data=data,
             body_params={
                 "userid": userid,
-                "password": password,
+                "password": password
             },
             ogg_service="adminsrvr",
             if_exists=if_exists,
@@ -2913,7 +3013,7 @@ class OGGRestAPI:
             template="/services/{version}/credentials/{domain}/{alias}",
             path_params={
                 "domain": domain,
-                "alias": alias,
+                "alias": alias
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -2967,12 +3067,12 @@ class OGGRestAPI:
             template="/services/{version}/credentials/{domain}/{alias}",
             path_params={
                 "domain": domain,
-                "alias": alias,
+                "alias": alias
             },
             data=data,
             body_params={
                 "userid": userid,
-                "password": password,
+                "password": password
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -3008,7 +3108,7 @@ class OGGRestAPI:
             template="/services/{version}/credentials/{domain}/{alias}/valid",
             path_params={
                 "domain": domain,
-                "alias": alias,
+                "alias": alias
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -3077,6 +3177,7 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/currentuser/reauthorize
     def reauthorize_current_user(
         self,
+        ogg_service='',
         raw_response=False
     ):
         """
@@ -3086,16 +3187,20 @@ class OGGRestAPI:
         Use this endpoint to reauthorize the current user
 
         Parameters:
+            ogg_service (str): The service name to use for the request. It is only needed when using a
+                reverse proxy. Example: ogg_service_example
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
         Example:
-            client.reauthorize_current_user()
-
+            client.reauthorize_current_user(
+                ogg_service='adminsrvr'
+            )
         """
         return self._call(
             method="POST",
             template="/services/{version}/currentuser/reauthorize",
+            ogg_service=ogg_service,
             raw_response=raw_response
         )
 
@@ -3152,7 +3257,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/dataTargetTypes/{data_target_type}",
             path_params={
-                "data_target_type": data_target_type,
+                "data_target_type": data_target_type
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -3233,21 +3338,21 @@ class OGGRestAPI:
             client.update_datastore(
                 data={
                     "type": "LMDB",
-                    "retentionDays": "30",
-                    "collectorWorkerThreads": "5",
-                    "collectorWorkerQueueLimit": "10000",
-                    "monitorHeartBeatTimeout": "10",
-                    "dataStoreMaxDBs": "5000"
+                    "retentionDays": 30,
+                    "collectorWorkerThreads": 5,
+                    "collectorWorkerQueueLimit": 10000,
+                    "monitorHeartBeatTimeout": 10,
+                    "dataStoreMaxDBs": 5000
                 }
             )
 
             client.update_datastore(
-                retention_days='30',
-                collector_worker_threads='5',
+                retention_days=30,
+                collector_worker_threads=5,
                 path=None,
-                collector_worker_queue_limit='10000',
-                monitor_heart_beat_timeout='10',
-                data_store_max_dbs='5000',
+                collector_worker_queue_limit=10000,
+                monitor_heart_beat_timeout=10,
+                data_store_max_dbs=5000,
                 reinitialize=None,
                 type='LMDB',
                 repair=None
@@ -3266,7 +3371,7 @@ class OGGRestAPI:
                 "dataStoreMaxDBs": data_store_max_dbs,
                 "reinitialize": reinitialize,
                 "type": type,
-                "repair": repair,
+                "repair": repair
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -3325,7 +3430,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/deployments/{deployment}",
             path_params={
-                "deployment": deployment,
+                "deployment": deployment
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -3336,6 +3441,7 @@ class OGGRestAPI:
         self,
         deployment,
         ogg_home=None,
+        cluster=None,
         ogg_data_home=None,
         ogg_conf_home=None,
         ogg_archive_home=None,
@@ -3363,6 +3469,8 @@ class OGGRestAPI:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
             ogg_home (str): The deployment's home directory. Example: oggHome_example
+            cluster (list): array that contains the roles of this deployment in each Oracle GoldenGate
+                installation. Example: cluster_example
             ogg_data_home (str): The deployment's trail data directory. Example: oggDataHome_example
             ogg_conf_home (str): The deployment's configuration directory. Example: oggConfHome_example
             ogg_archive_home (str): The deployment's archived trail data directory. Example:
@@ -3402,6 +3510,12 @@ class OGGRestAPI:
             client.create_deployment(
                 deployment='deployment_example',
                 ogg_home='/u01/ogg',
+                cluster=[
+                    {
+                        "memberName": None,
+                        "role": None
+                    }
+                ],
                 ogg_data_home=None,
                 ogg_conf_home=None,
                 ogg_archive_home=None,
@@ -3436,11 +3550,12 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/deployments/{deployment}",
             path_params={
-                "deployment": deployment,
+                "deployment": deployment
             },
             data=data,
             body_params={
                 "oggHome": ogg_home,
+                "cluster": cluster,
                 "oggDataHome": ogg_data_home,
                 "oggConfHome": ogg_conf_home,
                 "oggArchiveHome": ogg_archive_home,
@@ -3453,7 +3568,7 @@ class OGGRestAPI:
                 "oggVarHome": ogg_var_home,
                 "environment": environment,
                 "passwordRegex": password_regex,
-                "metrics": metrics,
+                "metrics": metrics
             },
             ogg_service="ServiceManager",
             if_exists=if_exists,
@@ -3465,6 +3580,7 @@ class OGGRestAPI:
         self,
         deployment,
         ogg_home=None,
+        cluster=None,
         ogg_data_home=None,
         ogg_conf_home=None,
         ogg_archive_home=None,
@@ -3491,6 +3607,8 @@ class OGGRestAPI:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
             ogg_home (str): The deployment's home directory. Example: oggHome_example
+            cluster (list): array that contains the roles of this deployment in each Oracle GoldenGate
+                installation. Example: cluster_example
             ogg_data_home (str): The deployment's trail data directory. Example: oggDataHome_example
             ogg_conf_home (str): The deployment's configuration directory. Example: oggConfHome_example
             ogg_archive_home (str): The deployment's archived trail data directory. Example:
@@ -3525,6 +3643,12 @@ class OGGRestAPI:
             client.update_deployment(
                 deployment='deployment_example',
                 ogg_home=None,
+                cluster=[
+                    {
+                        "memberName": None,
+                        "role": None
+                    }
+                ],
                 ogg_data_home=None,
                 ogg_conf_home=None,
                 ogg_archive_home=None,
@@ -3559,11 +3683,12 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/deployments/{deployment}",
             path_params={
-                "deployment": deployment,
+                "deployment": deployment
             },
             data=data,
             body_params={
                 "oggHome": ogg_home,
+                "cluster": cluster,
                 "oggDataHome": ogg_data_home,
                 "oggConfHome": ogg_conf_home,
                 "oggArchiveHome": ogg_archive_home,
@@ -3576,7 +3701,7 @@ class OGGRestAPI:
                 "oggVarHome": ogg_var_home,
                 "environment": environment,
                 "passwordRegex": password_regex,
-                "metrics": metrics,
+                "metrics": metrics
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -3609,7 +3734,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/deployments/{deployment}",
             path_params={
-                "deployment": deployment,
+                "deployment": deployment
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -3642,7 +3767,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/deployments/{deployment}/authorization/profiles",
             path_params={
-                "deployment": deployment,
+                "deployment": deployment
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -3679,7 +3804,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/authorization/profiles/{profile}",
             path_params={
                 "deployment": deployment,
-                "profile": profile,
+                "profile": profile
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -3730,7 +3855,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/authorization/profiles/{profile}",
             path_params={
                 "deployment": deployment,
-                "profile": profile,
+                "profile": profile
             },
             data=data,
             ogg_service="ServiceManager",
@@ -3781,7 +3906,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/authorization/profiles/{profile}",
             path_params={
                 "deployment": deployment,
-                "profile": profile,
+                "profile": profile
             },
             data=data,
             ogg_service="ServiceManager",
@@ -3819,7 +3944,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/authorization/profiles/{profile}",
             path_params={
                 "deployment": deployment,
-                "profile": profile,
+                "profile": profile
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -3856,7 +3981,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/authorization/profiles/{profile}/valid",
             path_params={
                 "deployment": deployment,
-                "profile": profile,
+                "profile": profile
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -3889,7 +4014,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/deployments/{deployment}/certificates",
             path_params={
-                "deployment": deployment,
+                "deployment": deployment
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -3926,7 +4051,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/certificates/{type}",
             path_params={
                 "deployment": deployment,
-                "type": type,
+                "type": type
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -3967,7 +4092,7 @@ class OGGRestAPI:
             path_params={
                 "deployment": deployment,
                 "type": type,
-                "certificate": certificate,
+                "certificate": certificate
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4023,7 +4148,7 @@ class OGGRestAPI:
             path_params={
                 "deployment": deployment,
                 "type": type,
-                "certificate": certificate,
+                "certificate": certificate
             },
             data=data,
             ogg_service="ServiceManager",
@@ -4066,7 +4191,7 @@ class OGGRestAPI:
             path_params={
                 "deployment": deployment,
                 "type": type,
-                "certificate": certificate,
+                "certificate": certificate
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4118,7 +4243,7 @@ class OGGRestAPI:
             path_params={
                 "deployment": deployment,
                 "type": type,
-                "certificate": certificate,
+                "certificate": certificate
             },
             data=data,
             ogg_service="ServiceManager",
@@ -4160,7 +4285,7 @@ class OGGRestAPI:
             path_params={
                 "deployment": deployment,
                 "type": type,
-                "certificate": certificate,
+                "certificate": certificate
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4193,7 +4318,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/deployments/{deployment}/plugin/templates",
             path_params={
-                "deployment": deployment,
+                "deployment": deployment
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4230,7 +4355,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/plugin/templates/{plugin}",
             path_params={
                 "deployment": deployment,
-                "plugin": plugin,
+                "plugin": plugin
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4312,11 +4437,11 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/plugin/templates/{plugin}",
             path_params={
                 "deployment": deployment,
-                "plugin": plugin,
+                "plugin": plugin
             },
             data=data,
             body_params={
-                "metadata": metadata,
+                "metadata": metadata
             },
             ogg_service="ServiceManager",
             if_exists=if_exists,
@@ -4354,7 +4479,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/plugin/templates/{plugin}",
             path_params={
                 "deployment": deployment,
-                "plugin": plugin,
+                "plugin": plugin
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4425,11 +4550,11 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/plugin/templates/{plugin}",
             path_params={
                 "deployment": deployment,
-                "plugin": plugin,
+                "plugin": plugin
             },
             data=data,
             body_params={
-                "metadata": metadata,
+                "metadata": metadata
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4462,7 +4587,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/deployments/{deployment}/services",
             path_params={
-                "deployment": deployment,
+                "deployment": deployment
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4499,7 +4624,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/services/{service}",
             path_params={
                 "deployment": deployment,
-                "service": service,
+                "service": service
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4560,11 +4685,11 @@ class OGGRestAPI:
                     "$schema": "ogg:service",
                     "config": {
                         "network": {
-                            "serviceListeningPort": "19012"
+                            "serviceListeningPort": 19012
                         },
                         "security": False,
                         "authorizationEnabled": True,
-                        "defaultSynchronousWait": "30",
+                        "defaultSynchronousWait": 30,
                         "asynchronousOperationEnabled": True,
                         "legacyProtocolEnabled": True,
                         "taskManagerEnabled": True
@@ -4578,11 +4703,11 @@ class OGGRestAPI:
                 service='service_example',
                 config={
                     "network": {
-                        "serviceListeningPort": "19012"
+                        "serviceListeningPort": 19012
                     },
                     "security": False,
                     "authorizationEnabled": True,
-                    "defaultSynchronousWait": "30",
+                    "defaultSynchronousWait": 30,
                     "asynchronousOperationEnabled": True,
                     "legacyProtocolEnabled": True,
                     "taskManagerEnabled": True
@@ -4610,7 +4735,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/services/{service}",
             path_params={
                 "deployment": deployment,
-                "service": service,
+                "service": service
             },
             data=data,
             body_params={
@@ -4622,7 +4747,7 @@ class OGGRestAPI:
                 "critical": critical,
                 "restart": restart,
                 "locked": locked,
-                "configForce": config_force,
+                "configForce": config_force
             },
             ogg_service="ServiceManager",
             if_exists=if_exists,
@@ -4709,7 +4834,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/services/{service}",
             path_params={
                 "deployment": deployment,
-                "service": service,
+                "service": service
             },
             data=data,
             body_params={
@@ -4721,7 +4846,7 @@ class OGGRestAPI:
                 "critical": critical,
                 "restart": restart,
                 "locked": locked,
-                "configForce": config_force,
+                "configForce": config_force
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4758,7 +4883,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/services/{service}",
             path_params={
                 "deployment": deployment,
-                "service": service,
+                "service": service
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4795,7 +4920,7 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/services/{service}/logs",
             path_params={
                 "deployment": deployment,
-                "service": service,
+                "service": service
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -4806,6 +4931,7 @@ class OGGRestAPI:
         self,
         deployment,
         service,
+        content=False,
         raw_response=False
     ):
         """
@@ -4818,6 +4944,8 @@ class OGGRestAPI:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example:
                 deployment_example
             service (str): Name of the service. Required. Example: service_example
+            content (bool): If True, request text/plain and return the raw content as a string instead of
+                the {enabled, dataExists} metadata JSON returned by default.
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -4832,9 +4960,10 @@ class OGGRestAPI:
             template="/services/{version}/deployments/{deployment}/services/{service}/logs/default",
             path_params={
                 "deployment": deployment,
-                "service": service,
+                "service": service
             },
             ogg_service="ServiceManager",
+            content=content,
             raw_response=raw_response
         )
 
@@ -4890,7 +5019,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/enckeys/{key_name}",
             path_params={
-                "key_name": key_name,
+                "key_name": key_name
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -4922,7 +5051,7 @@ class OGGRestAPI:
             client.create_encryption_key(
                 key_name='keyName_example',
                 data={
-                    "bitLength": "128"
+                    "bitLength": 128
                 }
             )
         """
@@ -4930,7 +5059,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/enckeys/{key_name}",
             path_params={
-                "key_name": key_name,
+                "key_name": key_name
             },
             data=data,
             ogg_service="adminsrvr",
@@ -4964,7 +5093,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/enckeys/{key_name}",
             path_params={
-                "key_name": key_name,
+                "key_name": key_name
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5012,12 +5141,12 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/enckeys/{key_name}/encrypt",
             path_params={
-                "key_name": key_name,
+                "key_name": key_name
             },
             data=data,
             body_params={
                 "encoding": encoding,
-                "data": data_1,
+                "data": data_1
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5075,7 +5204,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/encryption/profiles/{profile}",
             path_params={
-                "profile": profile,
+                "profile": profile
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5116,7 +5245,7 @@ class OGGRestAPI:
                     "masterkey": {
                         "name": "OGGMK_A1",
                         "version": "LATEST",
-                        "ttl": "86400"
+                        "ttl": 86400
                     }
                 }
             )
@@ -5125,7 +5254,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/encryption/profiles/{profile}",
             path_params={
-                "profile": profile,
+                "profile": profile
             },
             data=data,
             ogg_service="adminsrvr",
@@ -5165,7 +5294,7 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/encryption/profiles/{profile}",
             path_params={
-                "profile": profile,
+                "profile": profile
             },
             data=data,
             ogg_service="adminsrvr",
@@ -5198,7 +5327,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/encryption/profiles/{profile}",
             path_params={
-                "profile": profile,
+                "profile": profile
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5230,7 +5359,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/encryption/profiles/{profile}/valid",
             path_params={
-                "profile": profile,
+                "profile": profile
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5290,7 +5419,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/extracts/{extract}",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5303,6 +5432,7 @@ class OGGRestAPI:
         begin=None,
         passive=None,
         config=None,
+        plugin_type=None,
         encryption_profile=None,
         status=None,
         critical=None,
@@ -5335,6 +5465,8 @@ class OGGRestAPI:
             begin (dict): Starting point for data processing. Example: begin_example
             passive (bool): Passive extract controlled by an alias on the target. Example: passive_example
             config (list):  Example: config_example
+            plugin_type (str): Plugin type for creation of replication slot in PostgreSQL. Example:
+                pluginType_example
             encryption_profile (dict):  Example: encryptionProfile_example
             status (str): Oracle GoldenGate Process Status. Example: status_example
             critical (bool): Indicates the extract is critical to the deployment. Example: critical_example
@@ -5405,6 +5537,7 @@ class OGGRestAPI:
                     "SOURCECATALOG dbnorth_pdb1",
                     "TABLE hr.*;"
                 ],
+                plugin_type=None,
                 encryption_profile=None,
                 status=None,
                 critical=None,
@@ -5450,13 +5583,14 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/extracts/{extract}",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             data=data,
             body_params={
                 "begin": begin,
                 "passive": passive,
                 "config": config,
+                "pluginType": plugin_type,
                 "encryptionProfile": encryption_profile,
                 "status": status,
                 "critical": critical,
@@ -5471,7 +5605,7 @@ class OGGRestAPI:
                 "miningCredentials": mining_credentials,
                 "alias": alias,
                 "credentials": credentials,
-                "description": description,
+                "description": description
             },
             ogg_service="adminsrvr",
             if_exists=if_exists,
@@ -5485,6 +5619,7 @@ class OGGRestAPI:
         begin=None,
         passive=None,
         config=None,
+        plugin_type=None,
         encryption_profile=None,
         status=None,
         critical=None,
@@ -5517,6 +5652,8 @@ class OGGRestAPI:
             begin (dict): Starting point for data processing. Example: begin_example
             passive (bool): Passive extract controlled by an alias on the target. Example: passive_example
             config (list):  Example: config_example
+            plugin_type (str): Plugin type for creation of replication slot in PostgreSQL. Example:
+                pluginType_example
             encryption_profile (dict):  Example: encryptionProfile_example
             status (str): Oracle GoldenGate Process Status. Example: status_example
             critical (bool): Indicates the extract is critical to the deployment. Example: critical_example
@@ -5556,6 +5693,7 @@ class OGGRestAPI:
                 config=[
                     None
                 ],
+                plugin_type=None,
                 encryption_profile=None,
                 status='running',
                 critical=None,
@@ -5590,13 +5728,14 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/extracts/{extract}",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             data=data,
             body_params={
                 "begin": begin,
                 "passive": passive,
                 "config": config,
+                "pluginType": plugin_type,
                 "encryptionProfile": encryption_profile,
                 "status": status,
                 "critical": critical,
@@ -5611,7 +5750,7 @@ class OGGRestAPI:
                 "miningCredentials": mining_credentials,
                 "alias": alias,
                 "credentials": credentials,
-                "description": description,
+                "description": description
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5645,7 +5784,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/extracts/{extract}",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5685,7 +5824,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/extracts/{extract}/command",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             data=data,
             ogg_service="adminsrvr",
@@ -5720,7 +5859,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/extracts/{extract}/info",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5754,7 +5893,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/extracts/{extract}/info/checkpoints",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5788,7 +5927,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/extracts/{extract}/info/diagnostics",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5828,7 +5967,7 @@ class OGGRestAPI:
             template="/services/{version}/extracts/{extract}/info/diagnostics/{diagnostic}",
             path_params={
                 "extract": extract,
-                "diagnostic": diagnostic,
+                "diagnostic": diagnostic
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5862,7 +6001,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/extracts/{extract}/info/history",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5896,7 +6035,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/extracts/{extract}/info/logs",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -5907,6 +6046,7 @@ class OGGRestAPI:
         self,
         extract,
         log,
+        content=False,
         raw_response=False
     ):
         """
@@ -5921,6 +6061,8 @@ class OGGRestAPI:
                 extract_example
             log (str): The name of the log, which is the extract name, followed by an optional revision
                 number(as -number) and '.log'. Required. Example: log_example
+            content (bool): If True, request text/plain and return the raw content as a string instead of
+                the {enabled, dataExists} metadata JSON returned by default.
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -5935,9 +6077,10 @@ class OGGRestAPI:
             template="/services/{version}/extracts/{extract}/info/logs/{log}",
             path_params={
                 "extract": extract,
-                "log": log,
+                "log": log
             },
             ogg_service="adminsrvr",
+            content=content,
             raw_response=raw_response
         )
 
@@ -5969,7 +6112,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/extracts/{extract}/info/reports",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -6008,7 +6151,7 @@ class OGGRestAPI:
             template="/services/{version}/extracts/{extract}/info/reports/{report}",
             path_params={
                 "extract": extract,
-                "report": report,
+                "report": report
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -6042,7 +6185,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/extracts/{extract}/info/status",
             path_params={
-                "extract": extract,
+                "extract": extract
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -6071,6 +6214,692 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/exttrails",
             ogg_service="distsrvr",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/installation/aiservice/health
+    def get_installation_ai_service_health(
+        self,
+        raw_response=False
+    ):
+        """
+        Service Manager/AI Management
+        GET /services/{version}/installation/aiservice/health
+        Required Role: Operator
+        Retrieve the AI Service Health.
+
+        Parameters:
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.get_installation_ai_service_health()
+
+        """
+        return self._call(
+            method="GET",
+            template="/services/{version}/installation/aiservice/health",
+            ogg_service="ServiceManager",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/installation/aiservice/models
+    def list_installation_ai_service_models(
+        self,
+        raw_response=False
+    ):
+        """
+        Service Manager/AI Management
+        GET /services/{version}/installation/aiservice/models
+        Required Role: Operator
+        Retrieve the AI Service Models.
+
+        Parameters:
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.list_installation_ai_service_models()
+
+        """
+        return self._call(
+            method="GET",
+            template="/services/{version}/installation/aiservice/models",
+            ogg_service="ServiceManager",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/installation/aiservice/models/{model}
+    def get_installation_ai_service_model(
+        self,
+        model,
+        raw_response=False
+    ):
+        """
+        Service Manager/AI Management
+        GET /services/{version}/installation/aiservice/models/{model}
+        Required Role: Operator
+        Retrieve the details of an AI Model.
+
+        Parameters:
+            model (str): Name of the Model. Required. Example: model_example
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.get_installation_ai_service_model(
+                model='model_example'
+            )
+        """
+        return self._call(
+            method="GET",
+            template="/services/{version}/installation/aiservice/models/{model}",
+            path_params={
+                "model": model
+            },
+            ogg_service="ServiceManager",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/installation/aiservice/models/{model}
+    def create_installation_ai_service_model(
+        self,
+        model,
+        capabilities=None,
+        priority=None,
+        tasks=None,
+        loaded=None,
+        provider_id=None,
+        enabled=None,
+        id=None,
+        name=None,
+        remote_model_name=None,
+        type=None,
+        limits=None,
+        parameters=None,
+        description=None,
+        data=None,
+        raw_response=False,
+        if_exists='fail'
+    ):
+        """
+        Service Manager/AI Management
+        POST /services/{version}/installation/aiservice/models/{model}
+        Required Role: Security
+        Create an AI Model.
+
+        Parameters:
+            model (str): Name of the Model. Required. Example: model_example
+            capabilities (list):  Example: capabilities_example
+            priority (int):  Example: priority_example
+            tasks (list):  Example: tasks_example
+            loaded (bool):  Example: loaded_example
+            provider_id (str):  Example: providerId_example
+            enabled (bool):  Example: enabled_example
+            id (str):  Example: id_example
+            name (str):  Example: name_example
+            remote_model_name (str):  Example: remoteModelName_example
+            type (str):  Example: type_example
+            limits (dict):  Example: limits_example
+            parameters (dict):  Example: parameters_example
+            description (str):  Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
+
+        Example:
+            client.create_installation_ai_service_model(
+                model='model_example',
+                data={
+                    "name": "Voyage 2",
+                    "description": "Voyage embedding model for regression",
+                    "capabilities": [
+                        "embed"
+                    ],
+                    "providerId": "voyage1",
+                    "remoteModelName": "voyage-2",
+                    "limits": {
+                        "maxInputCharacters": 20000
+                    }
+                }
+            )
+
+            client.create_installation_ai_service_model(
+                model='model_example',
+                capabilities=[
+                    "embed"
+                ],
+                priority=None,
+                tasks=[
+                    None
+                ],
+                loaded=None,
+                provider_id='voyage1',
+                enabled=None,
+                id=None,
+                name='Voyage 2',
+                remote_model_name='voyage-2',
+                type=None,
+                limits={
+                    "maxInputCharacters": 20000
+                },
+                parameters={},
+                description='Voyage embedding model for regression'
+            )
+        """
+        return self._call(
+            method="POST",
+            template="/services/{version}/installation/aiservice/models/{model}",
+            path_params={
+                "model": model
+            },
+            data=data,
+            body_params={
+                "capabilities": capabilities,
+                "priority": priority,
+                "tasks": tasks,
+                "loaded": loaded,
+                "providerId": provider_id,
+                "enabled": enabled,
+                "id": id,
+                "name": name,
+                "remoteModelName": remote_model_name,
+                "type": type,
+                "limits": limits,
+                "parameters": parameters,
+                "description": description
+            },
+            ogg_service="ServiceManager",
+            if_exists=if_exists,
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/installation/aiservice/models/{model}
+    def update_installation_ai_service_model(
+        self,
+        model,
+        capabilities=None,
+        priority=None,
+        tasks=None,
+        loaded=None,
+        provider_id=None,
+        enabled=None,
+        id=None,
+        name=None,
+        remote_model_name=None,
+        type=None,
+        limits=None,
+        parameters=None,
+        description=None,
+        data=None,
+        raw_response=False
+    ):
+        """
+        Service Manager/AI Management
+        PATCH /services/{version}/installation/aiservice/models/{model}
+        Required Role: Security
+        Modify an AI Model.
+
+        Parameters:
+            model (str): Name of the Model. Required. Example: model_example
+            capabilities (list):  Example: capabilities_example
+            priority (int):  Example: priority_example
+            tasks (list):  Example: tasks_example
+            loaded (bool):  Example: loaded_example
+            provider_id (str):  Example: providerId_example
+            enabled (bool):  Example: enabled_example
+            id (str):  Example: id_example
+            name (str):  Example: name_example
+            remote_model_name (str):  Example: remoteModelName_example
+            type (str):  Example: type_example
+            limits (dict):  Example: limits_example
+            parameters (dict):  Example: parameters_example
+            description (str):  Example: description_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.update_installation_ai_service_model(
+                model='model_example',
+                data={
+                    "name": "Voyage 2",
+                    "description": "Voyage embedding model for regression",
+                    "capabilities": [
+                        "embed"
+                    ],
+                    "providerId": "voyage1",
+                    "remoteModelName": "voyage-2",
+                    "limits": {
+                        "maxInputCharacters": 20000
+                    }
+                }
+            )
+
+            client.update_installation_ai_service_model(
+                model='model_example',
+                capabilities=[
+                    "embed"
+                ],
+                priority=None,
+                tasks=[
+                    None
+                ],
+                loaded=None,
+                provider_id='voyage1',
+                enabled=None,
+                id=None,
+                name='Voyage 2',
+                remote_model_name='voyage-2',
+                type=None,
+                limits={
+                    "maxInputCharacters": 20000
+                },
+                parameters={},
+                description='Voyage embedding model for regression'
+            )
+        """
+        return self._call(
+            method="PATCH",
+            template="/services/{version}/installation/aiservice/models/{model}",
+            path_params={
+                "model": model
+            },
+            data=data,
+            body_params={
+                "capabilities": capabilities,
+                "priority": priority,
+                "tasks": tasks,
+                "loaded": loaded,
+                "providerId": provider_id,
+                "enabled": enabled,
+                "id": id,
+                "name": name,
+                "remoteModelName": remote_model_name,
+                "type": type,
+                "limits": limits,
+                "parameters": parameters,
+                "description": description
+            },
+            ogg_service="ServiceManager",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/installation/aiservice/models/{model}
+    def delete_installation_ai_service_model(
+        self,
+        model,
+        raw_response=False
+    ):
+        """
+        Service Manager/AI Management
+        DELETE /services/{version}/installation/aiservice/models/{model}
+        Required Role: Security
+        Delete an AI Model.
+
+        Parameters:
+            model (str): Name of the Model. Required. Example: model_example
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.delete_installation_ai_service_model(
+                model='model_example'
+            )
+        """
+        return self._call(
+            method="DELETE",
+            template="/services/{version}/installation/aiservice/models/{model}",
+            path_params={
+                "model": model
+            },
+            ogg_service="ServiceManager",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/installation/aiservice/providers
+    def list_installation_ai_service_providers(
+        self,
+        raw_response=False
+    ):
+        """
+        Service Manager/AI Management
+        GET /services/{version}/installation/aiservice/providers
+        Required Role: Operator
+        Retrieve the AI Service Providers.
+
+        Parameters:
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.list_installation_ai_service_providers()
+
+        """
+        return self._call(
+            method="GET",
+            template="/services/{version}/installation/aiservice/providers",
+            ogg_service="ServiceManager",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/installation/aiservice/providers/{provider}
+    def get_installation_ai_service_provider(
+        self,
+        provider,
+        raw_response=False
+    ):
+        """
+        Service Manager/AI Management
+        GET /services/{version}/installation/aiservice/providers/{provider}
+        Required Role: Security
+        Retrieve the details of an AI Provider.
+
+        Parameters:
+            provider (str): Name of the Provider. Required. Example: provider_example
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.get_installation_ai_service_provider(
+                provider='provider_example'
+            )
+        """
+        return self._call(
+            method="GET",
+            template="/services/{version}/installation/aiservice/providers/{provider}",
+            path_params={
+                "provider": provider
+            },
+            ogg_service="ServiceManager",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/installation/aiservice/providers/{provider}
+    def create_installation_ai_service_provider(
+        self,
+        provider,
+        capabilities=None,
+        retry=None,
+        authentication=None,
+        enabled=None,
+        id=None,
+        tasks_types=None,
+        name=None,
+        base_url=None,
+        metadata=None,
+        type=None,
+        regions=None,
+        timeouts=None,
+        description=None,
+        headers=None,
+        data=None,
+        raw_response=False,
+        if_exists='fail'
+    ):
+        """
+        Service Manager/AI Management
+        POST /services/{version}/installation/aiservice/providers/{provider}
+        Required Role: Security
+        Create an AI Provider.
+
+        Parameters:
+            provider (str): Name of the Provider. Required. Example: provider_example
+            capabilities (list):  Example: capabilities_example
+            retry (dict):  Example: retry_example
+            authentication (dict):  Example: authentication_example
+            enabled (bool):  Example: enabled_example
+            id (str):  Example: id_example
+            tasks_types (list):  Example: tasksTypes_example
+            name (str):  Example: name_example
+            base_url (str):  Example: baseUrl_example
+            metadata (dict):  Example: metadata_example
+            type (str):  Example: type_example
+            regions (list):  Example: regions_example
+            timeouts (dict):  Example: timeouts_example
+            description (str):  Example: description_example
+            headers (dict):  Example: headers_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example:
+                if_exists_example
+
+        Example:
+            client.create_installation_ai_service_provider(
+                provider='provider_example',
+                data={
+                    "name": "Voyage AI",
+                    "description": "Voyage AI embedding provider",
+                    "type": "voyage",
+                    "baseUrl": "https://api.voyageai.com/v1",
+                    "authentication": {
+                        "type": "api_key",
+                        "secret": "abcdefghijklmnopqrstuvwxyz0123456789"
+                    }
+                }
+            )
+
+            client.create_installation_ai_service_provider(
+                provider='provider_example',
+                capabilities=[
+                    None
+                ],
+                retry={
+                    "maxRetries": None,
+                    "initialBackoffMs": None,
+                    "maxBackoffMs": None,
+                    "backoffMultiplier": None
+                },
+                authentication={
+                    "type": "api_key",
+                    "secret": "abcdefghijklmnopqrstuvwxyz0123456789"
+                },
+                enabled=None,
+                id=None,
+                tasks_types=[
+                    None
+                ],
+                name='Voyage AI',
+                base_url='https://api.voyageai.com/v1',
+                metadata={},
+                type='voyage',
+                regions=[
+                    None
+                ],
+                timeouts={
+                    "requestTimeoutMs": None,
+                    "connectTimeoutMs": None,
+                    "totalTimeoutMs": None
+                },
+                description='Voyage AI embedding provider',
+                headers={}
+            )
+        """
+        return self._call(
+            method="POST",
+            template="/services/{version}/installation/aiservice/providers/{provider}",
+            path_params={
+                "provider": provider
+            },
+            data=data,
+            body_params={
+                "capabilities": capabilities,
+                "retry": retry,
+                "authentication": authentication,
+                "enabled": enabled,
+                "id": id,
+                "tasksTypes": tasks_types,
+                "name": name,
+                "baseUrl": base_url,
+                "metadata": metadata,
+                "type": type,
+                "regions": regions,
+                "timeouts": timeouts,
+                "description": description,
+                "headers": headers
+            },
+            ogg_service="ServiceManager",
+            if_exists=if_exists,
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/installation/aiservice/providers/{provider}
+    def update_installation_ai_service_provider(
+        self,
+        provider,
+        capabilities=None,
+        retry=None,
+        authentication=None,
+        enabled=None,
+        id=None,
+        tasks_types=None,
+        name=None,
+        base_url=None,
+        metadata=None,
+        type=None,
+        regions=None,
+        timeouts=None,
+        description=None,
+        headers=None,
+        data=None,
+        raw_response=False
+    ):
+        """
+        Service Manager/AI Management
+        PATCH /services/{version}/installation/aiservice/providers/{provider}
+        Required Role: Security
+        Patch an AI Provider.
+
+        Parameters:
+            provider (str): Name of the Provider. Required. Example: provider_example
+            capabilities (list):  Example: capabilities_example
+            retry (dict):  Example: retry_example
+            authentication (dict):  Example: authentication_example
+            enabled (bool):  Example: enabled_example
+            id (str):  Example: id_example
+            tasks_types (list):  Example: tasksTypes_example
+            name (str):  Example: name_example
+            base_url (str):  Example: baseUrl_example
+            metadata (dict):  Example: metadata_example
+            type (str):  Example: type_example
+            regions (list):  Example: regions_example
+            timeouts (dict):  Example: timeouts_example
+            description (str):  Example: description_example
+            headers (dict):  Example: headers_example
+            data (dict): Override body payload with a raw dict. Individual parameters are merged into this
+                dict when provided.
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.update_installation_ai_service_provider(
+                provider='provider_example',
+                data={
+                    "authentication": {
+                        "type": "api_key",
+                        "secret": "abcdefghijklmnopqrstuvwxyz0123456789"
+                    }
+                }
+            )
+
+            client.update_installation_ai_service_provider(
+                provider='provider_example',
+                capabilities=[
+                    None
+                ],
+                retry={
+                    "maxRetries": None,
+                    "initialBackoffMs": None,
+                    "maxBackoffMs": None,
+                    "backoffMultiplier": None
+                },
+                authentication={
+                    "type": "api_key",
+                    "secret": "abcdefghijklmnopqrstuvwxyz0123456789"
+                },
+                enabled=None,
+                id=None,
+                tasks_types=[
+                    None
+                ],
+                name=None,
+                base_url=None,
+                metadata={},
+                type=None,
+                regions=[
+                    None
+                ],
+                timeouts={
+                    "requestTimeoutMs": None,
+                    "connectTimeoutMs": None,
+                    "totalTimeoutMs": None
+                },
+                description=None,
+                headers={}
+            )
+        """
+        return self._call(
+            method="PATCH",
+            template="/services/{version}/installation/aiservice/providers/{provider}",
+            path_params={
+                "provider": provider
+            },
+            data=data,
+            body_params={
+                "capabilities": capabilities,
+                "retry": retry,
+                "authentication": authentication,
+                "enabled": enabled,
+                "id": id,
+                "tasksTypes": tasks_types,
+                "name": name,
+                "baseUrl": base_url,
+                "metadata": metadata,
+                "type": type,
+                "regions": regions,
+                "timeouts": timeouts,
+                "description": description,
+                "headers": headers
+            },
+            ogg_service="ServiceManager",
+            raw_response=raw_response
+        )
+
+    # Endpoint: /services/{version}/installation/aiservice/providers/{provider}
+    def delete_installation_ai_service_provider(
+        self,
+        provider,
+        raw_response=False
+    ):
+        """
+        Service Manager/AI Management
+        DELETE /services/{version}/installation/aiservice/providers/{provider}
+        Required Role: Security
+        Delete an AI Provider.
+
+        Parameters:
+            provider (str): Name of the Provider. Required. Example: provider_example
+            raw_response (bool): If True, return raw parsed response from _parse() instead of
+                _extract_main().
+
+        Example:
+            client.delete_installation_ai_service_provider(
+                provider='provider_example'
+            )
+        """
+        return self._call(
+            method="DELETE",
+            template="/services/{version}/installation/aiservice/providers/{provider}",
+            path_params={
+                "provider": provider
+            },
+            ogg_service="ServiceManager",
             raw_response=raw_response
         )
 
@@ -6103,11 +6932,14 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/installation/cluster
     def create_cluster(
         self,
-        region=None,
-        back_plane=None,
-        data_plane=None,
+        availability_domain=None,
         members=None,
+        fqdn=None,
+        data_plane=None,
+        region=None,
         join=None,
+        back_plane=None,
+        uses_reverse_proxy=None,
         data=None,
         raw_response=False,
         if_exists='fail'
@@ -6119,14 +6951,19 @@ class OGGRestAPI:
         Add the GoldenGate installation to an existing cluster or create a new cluster.
 
         Parameters:
-            region (str): The region of the cluster member. Required if not included in `data`. Example:
-                region_example
-            back_plane (dict): The listener on the local installation for intra-cluster member
-                communication. Required if not included in `data`. Example: backPlane_example
+            availability_domain (str): The availability domain of the cluster member. Example:
+                availabilityDomain_example
+            members (list): Cluster members. Example: members_example
+            fqdn (dict): The FQDN of the host. Example: fqdn_example
             data_plane (dict): The listener on the local installation for serving cluster data requests.
                 Required if not included in `data`. Example: dataPlane_example
-            members (list): Cluster members. Example: members_example
+            region (str): The region of the cluster member. Required if not included in `data`. Example:
+                region_example
             join (dict): Properties for joining an existing GoldenGate cluster. Example: join_example
+            back_plane (dict): The listener on the local installation for intra-cluster member
+                communication. Required if not included in `data`. Example: backPlane_example
+            uses_reverse_proxy (bool): Whether the installation is behind a reverse proxy or not. Example:
+                usesReverseProxy_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this
                 dict when provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of
@@ -6139,46 +6976,52 @@ class OGGRestAPI:
                 data={
                     "dataPlane": {
                         "host": "127.0.0.1",
-                        "port": "5512"
+                        "port": 5512
                     },
                     "backPlane": {
                         "host": "0.0.0.0",
-                        "port": "5511"
+                        "port": 5511
                     }
                 }
             )
 
             client.create_cluster(
-                region=None,
-                back_plane={
-                    "host": "0.0.0.0",
-                    "port": "5511"
-                },
-                data_plane={
-                    "host": "127.0.0.1",
-                    "port": "5512"
-                },
+                availability_domain=None,
                 members=[
                     {
-                        "memberName": None,
-                        "region": None,
-                        "backPlane": {
-                            "host": None,
-                            "port": None
-                        },
+                        "availabilityDomain": None,
+                        "fqdn": None,
                         "dataPlane": {
                             "host": None,
                             "port": None
                         },
+                        "region": None,
                         "current": None,
-                        "target": None
+                        "memberName": None,
+                        "target": None,
+                        "backPlane": {
+                            "host": None,
+                            "port": None
+                        },
+                        "usesReverseProxy": None
                     }
                 ],
+                fqdn=None,
+                data_plane={
+                    "host": "127.0.0.1",
+                    "port": 5512
+                },
+                region=None,
                 join={
                     "url": "https://remote-host.example.com:9011/services/v2",
                     "user": None,
                     "password": None
-                }
+                },
+                back_plane={
+                    "host": "0.0.0.0",
+                    "port": 5511
+                },
+                uses_reverse_proxy=None
             )
         """
         return self._call(
@@ -6186,11 +7029,14 @@ class OGGRestAPI:
             template="/services/{version}/installation/cluster",
             data=data,
             body_params={
-                "region": region,
-                "backPlane": back_plane,
-                "dataPlane": data_plane,
+                "availabilityDomain": availability_domain,
                 "members": members,
+                "fqdn": fqdn,
+                "dataPlane": data_plane,
+                "region": region,
                 "join": join,
+                "backPlane": back_plane,
+                "usesReverseProxy": uses_reverse_proxy
             },
             ogg_service="ServiceManager",
             if_exists=if_exists,
@@ -6228,6 +7074,9 @@ class OGGRestAPI:
         self,
         member_name=None,
         region=None,
+        availability_domain=None,
+        fqdn=None,
+        uses_reverse_proxy=None,
         back_plane=None,
         data_plane=None,
         data=None,
@@ -6245,6 +7094,11 @@ class OGGRestAPI:
                 `data`. Example: memberName_example
             region (str): The region of the new cluster member. Required if not included in `data`. Example:
                 region_example
+            availability_domain (str): The availability domain of the cluster member. Required if not
+                included in `data`. Example: availabilityDomain_example
+            fqdn (dict): The FQDN of the host. Required if not included in `data`. Example: fqdn_example
+            uses_reverse_proxy (bool): Whether the installation is behind a reverse proxy or not. Required
+                if not included in `data`. Example: usesReverseProxy_example
             back_plane (dict): The address of the listener on the new member for intra-cluster member
                 communication. Required if not included in `data`. Example: backPlane_example
             data_plane (dict): The listener on the new member for serving cluster data requests. Example:
@@ -6263,11 +7117,11 @@ class OGGRestAPI:
                     "memberName": "oggdev-2",
                     "backPlane": {
                         "host": "0.0.0.0",
-                        "port": "5511"
+                        "port": 5511
                     },
                     "dataPlane": {
                         "host": "127.0.0.1",
-                        "port": "5512"
+                        "port": 5512
                     }
                 }
             )
@@ -6275,13 +7129,16 @@ class OGGRestAPI:
             client.add_cluster_member(
                 member_name='oggdev-2',
                 region=None,
+                availability_domain=None,
+                fqdn=None,
+                uses_reverse_proxy=None,
                 back_plane={
                     "host": "0.0.0.0",
-                    "port": "5511"
+                    "port": 5511
                 },
                 data_plane={
                     "host": "127.0.0.1",
-                    "port": "5512"
+                    "port": 5512
                 }
             )
         """
@@ -6292,8 +7149,11 @@ class OGGRestAPI:
             body_params={
                 "memberName": member_name,
                 "region": region,
+                "availabilityDomain": availability_domain,
+                "fqdn": fqdn,
+                "usesReverseProxy": uses_reverse_proxy,
                 "backPlane": back_plane,
-                "dataPlane": data_plane,
+                "dataPlane": data_plane
             },
             ogg_service="ServiceManager",
             if_exists=if_exists,
@@ -6326,7 +7186,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/installation/cluster/role/{member}",
             path_params={
-                "member": member,
+                "member": member
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -6377,13 +7237,13 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/installation/cluster/role/{member}",
             path_params={
-                "member": member,
+                "member": member
             },
             data=data,
             body_params={
                 "memberName": member_name,
                 "current": current,
-                "target": target,
+                "target": target
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -6415,7 +7275,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/installation/cluster/role/{member}",
             path_params={
-                "member": member,
+                "member": member
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -6491,7 +7351,7 @@ class OGGRestAPI:
             data=data,
             body_params={
                 "installationId": installation_id,
-                "configurationServiceEnabled": configuration_service_enabled,
+                "configurationServiceEnabled": configuration_service_enabled
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -6624,7 +7484,7 @@ class OGGRestAPI:
                 "messages": messages,
                 "locked": locked,
                 "options": options,
-                "replaced": replaced,
+                "replaced": replaced
             },
             ogg_service="ServiceManager",
             if_exists=if_exists,
@@ -6658,7 +7518,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/installation/configuration/backends/{backend}",
             path_params={
-                "backend": backend,
+                "backend": backend
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -6717,11 +7577,11 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/installation/configuration/backends/{backend}",
             path_params={
-                "backend": backend,
+                "backend": backend
             },
             data=data,
             body_params={
-                "patches": patches,
+                "patches": patches
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -6754,7 +7614,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/installation/configuration/backends/{backend}",
             path_params={
-                "backend": backend,
+                "backend": backend
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -6849,7 +7709,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/installation/configuration/backends/{backend}/actions/replaces",
             path_params={
-                "backend": backend,
+                "backend": backend
             },
             data=data,
             body_params={
@@ -6864,7 +7724,7 @@ class OGGRestAPI:
                 "messages": messages,
                 "locked": locked,
                 "options": options,
-                "replaced": replaced,
+                "replaced": replaced
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -6879,7 +7739,7 @@ class OGGRestAPI:
         """
         Common/Installation
         GET /services/{version}/installation/deployments
-        Required Role: Any
+        Required Role: User
         Retrieve a list of all Oracle GoldenGate deployments for the installation.
 
         Parameters:
@@ -6952,7 +7812,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/installation/plugins/{plugin}",
             path_params={
-                "plugin": plugin,
+                "plugin": plugin
             },
             ogg_service="ServiceManager",
             raw_response=raw_response
@@ -7021,6 +7881,7 @@ class OGGRestAPI:
     # Endpoint: /services/{version}/logs/events
     def list_log_events(
         self,
+        content=False,
         raw_response=False
     ):
         """
@@ -7030,6 +7891,8 @@ class OGGRestAPI:
         This endpoint provides a log of all critical events that occur in replication processes.
 
         Parameters:
+            content (bool): If True, request text/plain and return the raw content as a string instead of
+                the {enabled, dataExists} metadata JSON returned by default.
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7041,6 +7904,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/logs/events",
             ogg_service="adminsrvr",
+            content=content,
             raw_response=raw_response
         )
 
@@ -7049,6 +7913,7 @@ class OGGRestAPI:
         self,
         log,
         ogg_service='',
+        content=False,
         raw_response=False
     ):
         """
@@ -7061,6 +7926,8 @@ class OGGRestAPI:
             log (str): Name of the log. Required. Example: log_example
             ogg_service (str): The service name to use for the request. It is only needed when using a
                 reverse proxy. Example: ogg_service_example
+            content (bool): If True, request text/plain and return the raw content as a string instead of
+                the {enabled, dataExists} metadata JSON returned by default.
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -7074,9 +7941,10 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/logs/{log}",
             path_params={
-                "log": log,
+                "log": log
             },
             ogg_service=ogg_service,
+            content=content,
             raw_response=raw_response
         )
 
@@ -7130,12 +7998,12 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/logs/{log}",
             path_params={
-                "log": log,
+                "log": log
             },
             data=data,
             body_params={
                 "enabled": enabled,
-                "dataExists": data_exists,
+                "dataExists": data_exists
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -7173,7 +8041,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/logs/{log}",
             path_params={
-                "log": log,
+                "log": log
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -7261,7 +8129,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/masterkey/{key_version}",
             path_params={
-                "key_version": key_version,
+                "key_version": key_version
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -7309,12 +8177,12 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/masterkey/{key_version}",
             path_params={
-                "key_version": key_version,
+                "key_version": key_version
             },
             data=data,
             body_params={
                 "created": created,
-                "status": status,
+                "status": status
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -7346,7 +8214,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/masterkey/{key_version}",
             path_params={
-                "key_version": key_version,
+                "key_version": key_version
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -7440,7 +8308,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/metadata-catalog/{resource}",
             path_params={
-                "resource": resource,
+                "resource": resource
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -7493,7 +8361,7 @@ class OGGRestAPI:
             client.execute_monitoring_command(
                 data={
                     "name": "purgeDatastore",
-                    "daysValue": "90"
+                    "daysValue": 90
                 }
             )
         """
@@ -7635,7 +8503,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/monitoring/{item}/messages",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -7667,7 +8535,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/monitoring/{item}/statusChanges",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -7725,7 +8593,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/batchSqlStatistics",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -7757,7 +8625,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/brExtantObjectAges",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -7789,7 +8657,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/brExtantObjectSizes",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -7821,7 +8689,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/brObjectAges",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -7853,7 +8721,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/brObjectSizes",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -7885,7 +8753,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/brPoolsInfo",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -7917,7 +8785,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/brStatus",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -7949,7 +8817,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/cacheStatistics",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -7981,7 +8849,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/configurationEr",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8013,7 +8881,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/configurationManager",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8045,7 +8913,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/coordinationReplicat",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8077,7 +8945,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/currentInflightTransactions",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8109,7 +8977,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/databaseInOut",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8141,7 +9009,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/dependencyStats",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8173,7 +9041,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/distsrvrChunkStats",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8205,7 +9073,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/distsrvrNetworkStats",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8237,7 +9105,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/distsrvrPathStats",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8269,7 +9137,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/distsrvrTableStats",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8301,7 +9169,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/heartbeat",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8333,7 +9201,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/networkStatistics",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8365,7 +9233,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/parallelReplicat",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8397,7 +9265,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/pmsrvrProcStats",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8429,7 +9297,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/pmsrvrStats",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8461,7 +9329,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/pmsrvrWorkerStats",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8493,7 +9361,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/positionEr",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8525,7 +9393,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/process",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8557,7 +9425,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/processPerformance",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8589,7 +9457,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/queueBucketStatistics",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8621,7 +9489,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/queueStatistics",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8653,7 +9521,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/recvsrvrStats",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8685,7 +9553,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/serviceHealth",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8717,7 +9585,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/statisticsExtract",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8749,7 +9617,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/statisticsProcedureExtract",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8781,7 +9649,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/statisticsProcedureReplicat",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8813,7 +9681,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/statisticsReplicat",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8845,7 +9713,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/statisticsTableExtract",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8877,7 +9745,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/statisticsTableReplicat",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8909,7 +9777,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/superpoolStatistics",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8941,7 +9809,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/threadPerformance",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -8973,7 +9841,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/trailInput",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -9005,7 +9873,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/mpoints/{item}/trailOutput",
             path_params={
-                "item": item,
+                "item": item
             },
             ogg_service="pmsrvr",
             raw_response=raw_response
@@ -9071,7 +9939,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/oggerr/{message}",
             path_params={
-                "message": message,
+                "message": message
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -9129,7 +9997,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/parameters/{parameter}",
             path_params={
-                "parameter": parameter,
+                "parameter": parameter
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9189,7 +10057,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/replicats/{replicat}",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9312,7 +10180,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/replicats/{replicat}",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             data=data,
             body_params={
@@ -9329,7 +10197,7 @@ class OGGRestAPI:
                 "registration": registration,
                 "source": source,
                 "credentials": credentials,
-                "description": description,
+                "description": description
             },
             ogg_service="adminsrvr",
             if_exists=if_exists,
@@ -9421,7 +10289,7 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/replicats/{replicat}",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             data=data,
             body_params={
@@ -9438,7 +10306,7 @@ class OGGRestAPI:
                 "registration": registration,
                 "source": source,
                 "credentials": credentials,
-                "description": description,
+                "description": description
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9472,7 +10340,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/replicats/{replicat}",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9512,7 +10380,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/replicats/{replicat}/command",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             data=data,
             ogg_service="adminsrvr",
@@ -9547,7 +10415,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/replicats/{replicat}/info",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9581,7 +10449,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/replicats/{replicat}/info/checkpoints",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9615,7 +10483,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/replicats/{replicat}/info/diagnostics",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9655,7 +10523,7 @@ class OGGRestAPI:
             template="/services/{version}/replicats/{replicat}/info/diagnostics/{diagnostic}",
             path_params={
                 "replicat": replicat,
-                "diagnostic": diagnostic,
+                "diagnostic": diagnostic
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9689,7 +10557,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/replicats/{replicat}/info/history",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9723,7 +10591,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/replicats/{replicat}/info/logs",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9734,6 +10602,7 @@ class OGGRestAPI:
         self,
         replicat,
         log,
+        content=False,
         raw_response=False
     ):
         """
@@ -9748,6 +10617,8 @@ class OGGRestAPI:
                 replicat_example
             log (str): The name of the log, which is the replicat name, followed by an optional revision
                 number(as -number) and '.log'. Required. Example: log_example
+            content (bool): If True, request text/plain and return the raw content as a string instead of
+                the {enabled, dataExists} metadata JSON returned by default.
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -9762,9 +10633,10 @@ class OGGRestAPI:
             template="/services/{version}/replicats/{replicat}/info/logs/{log}",
             path_params={
                 "replicat": replicat,
-                "log": log,
+                "log": log
             },
             ogg_service="adminsrvr",
+            content=content,
             raw_response=raw_response
         )
 
@@ -9796,7 +10668,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/replicats/{replicat}/info/reports",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9835,7 +10707,7 @@ class OGGRestAPI:
             template="/services/{version}/replicats/{replicat}/info/reports/{report}",
             path_params={
                 "replicat": replicat,
-                "report": report,
+                "report": report
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9869,7 +10741,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/replicats/{replicat}/info/status",
             path_params={
-                "replicat": replicat,
+                "replicat": replicat
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -9935,7 +10807,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/requests/{request}",
             path_params={
-                "request": request,
+                "request": request
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -9971,7 +10843,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/requests/{request}/result",
             path_params={
-                "request": request,
+                "request": request
             },
             ogg_service=ogg_service,
             raw_response=raw_response
@@ -10029,7 +10901,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/sources/{distpath}",
             path_params={
-                "distpath": distpath,
+                "distpath": distpath
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -10089,10 +10961,13 @@ class OGGRestAPI:
                     "name": "path1",
                     "description": "my test distPath",
                     "source": {
-                        "uri": "trail://localhost:9012/dirdat/a1"
+                        "uri": "trail://sourcehost:9012/services/v2/sources?trail=a1"
                     },
                     "target": {
-                        "uri": "ogg://adc00oye:9013/dirdat/t1"
+                        "uri": "wss://targethost:9013/services/v2/targets?trail=t1",
+                        "authenticationMethod": {
+                            "certificate": "default"
+                        }
                     },
                     "begin": {
                         "sequence": "0",
@@ -10114,10 +10989,13 @@ class OGGRestAPI:
                 target_initiated=None,
                 ruleset=None,
                 source={
-                    "uri": "trail://localhost:9012/dirdat/a1"
+                    "uri": "trail://sourcehost:9012/services/v2/sources?trail=a1"
                 },
                 target={
-                    "uri": "ogg://adc00oye:9013/dirdat/t1"
+                    "uri": "wss://targethost:9013/services/v2/targets?trail=t1",
+                    "authenticationMethod": {
+                        "certificate": "default"
+                    }
                 },
                 options={
                     "tcpSourceTimer": None,
@@ -10149,7 +11027,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/sources/{distpath}",
             path_params={
-                "distpath": distpath,
+                "distpath": distpath
             },
             data=data,
             body_params={
@@ -10162,7 +11040,7 @@ class OGGRestAPI:
                 "source": source,
                 "target": target,
                 "options": options,
-                "description": description,
+                "description": description
             },
             ogg_service="distsrvr",
             if_exists=if_exists,
@@ -10190,8 +11068,8 @@ class OGGRestAPI:
         Distribution Service
         PATCH /services/{version}/sources/{distpath}
         Required Role: Operator
-        Update an Existing Distribution PathTo update an existing distribution path a user needs the
-            Administrator role. However, a user with the Operator role is allowed change the status property.
+        Update an existing distribution path. A user with the Operator role may change the status property. Any
+            other changes require the Administrator role.
 
         Parameters:
             distpath (str): Required. Example: distpath_example
@@ -10286,7 +11164,7 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/sources/{distpath}",
             path_params={
-                "distpath": distpath,
+                "distpath": distpath
             },
             data=data,
             body_params={
@@ -10299,7 +11177,7 @@ class OGGRestAPI:
                 "source": source,
                 "target": target,
                 "options": options,
-                "description": description,
+                "description": description
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -10331,7 +11209,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/sources/{distpath}",
             path_params={
-                "distpath": distpath,
+                "distpath": distpath
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -10363,7 +11241,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/sources/{distpath}/checkpoints",
             path_params={
-                "distpath": distpath,
+                "distpath": distpath
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -10395,7 +11273,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/sources/{distpath}/info",
             path_params={
-                "distpath": distpath,
+                "distpath": distpath
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -10427,7 +11305,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/sources/{distpath}/stats",
             path_params={
-                "distpath": distpath,
+                "distpath": distpath
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -10485,7 +11363,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/stream/{stream_name}",
             path_params={
-                "stream_name": stream_name,
+                "stream_name": stream_name
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -10566,7 +11444,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/stream/{stream_name}",
             path_params={
-                "stream_name": stream_name,
+                "stream_name": stream_name
             },
             data=data,
             body_params={
@@ -10577,7 +11455,7 @@ class OGGRestAPI:
                 "source": source,
                 "bufferSize": buffer_size,
                 "cloudEventsFormat": cloud_events_format,
-                "description": description,
+                "description": description
             },
             ogg_service="distsrvr",
             if_exists=if_exists,
@@ -10656,7 +11534,7 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/stream/{stream_name}",
             path_params={
-                "stream_name": stream_name,
+                "stream_name": stream_name
             },
             data=data,
             body_params={
@@ -10667,7 +11545,7 @@ class OGGRestAPI:
                 "source": source,
                 "bufferSize": buffer_size,
                 "cloudEventsFormat": cloud_events_format,
-                "description": description,
+                "description": description
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -10699,7 +11577,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/stream/{stream_name}",
             path_params={
-                "stream_name": stream_name,
+                "stream_name": stream_name
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -10731,7 +11609,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/stream/{stream_name}/info",
             path_params={
-                "stream_name": stream_name,
+                "stream_name": stream_name
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -10763,8 +11641,9 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/stream/{stream_name}/info/errors",
             path_params={
-                "stream_name": stream_name,
+                "stream_name": stream_name
             },
+            ogg_service="distsrvr",
             raw_response=raw_response
         )
 
@@ -10794,7 +11673,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/stream/{stream_name}/yaml",
             path_params={
-                "stream_name": stream_name,
+                "stream_name": stream_name
             },
             ogg_service="distsrvr",
             raw_response=raw_response
@@ -10811,7 +11690,7 @@ class OGGRestAPI:
         Distribution Service
         PATCH /services/{version}/stream/{streamName}/yaml
         Required Role: Administrator
-        Update the AsyncAPI YAML specification
+        update the asyncapi yaml specification
 
         Parameters:
             stream_name (str): Required. Example: streamName_example
@@ -10828,7 +11707,7 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/stream/{stream_name}/yaml",
             path_params={
-                "stream_name": stream_name,
+                "stream_name": stream_name
             },
             data=data,
             ogg_service="distsrvr",
@@ -10887,7 +11766,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/targets/{path}",
             path_params={
-                "path": path,
+                "path": path
             },
             ogg_service="recvsrvr",
             raw_response=raw_response
@@ -10947,10 +11826,13 @@ class OGGRestAPI:
                     "name": "path1",
                     "description": "my test distPath",
                     "source": {
-                        "uri": "trail://localhost:9012/dirdat/a1"
+                        "uri": "trail://sourcehost:9012/services/v2/sources?trail=a1"
                     },
                     "target": {
-                        "uri": "ogg://adc00oye:9013/dirdat/t1"
+                        "uri": "wss://targethost:9013/services/v2/targets?trail=t1",
+                        "authenticationMethod": {
+                            "certificate": "default"
+                        }
                     },
                     "begin": {
                         "sequence": "0",
@@ -10972,10 +11854,13 @@ class OGGRestAPI:
                 target_initiated=None,
                 ruleset=None,
                 source={
-                    "uri": "trail://localhost:9012/dirdat/a1"
+                    "uri": "trail://sourcehost:9012/services/v2/sources?trail=a1"
                 },
                 target={
-                    "uri": "ogg://adc00oye:9013/dirdat/t1"
+                    "uri": "wss://targethost:9013/services/v2/targets?trail=t1",
+                    "authenticationMethod": {
+                        "certificate": "default"
+                    }
                 },
                 options={
                     "tcpSourceTimer": None,
@@ -11007,7 +11892,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/targets/{path}",
             path_params={
-                "path": path,
+                "path": path
             },
             data=data,
             body_params={
@@ -11020,7 +11905,7 @@ class OGGRestAPI:
                 "source": source,
                 "target": target,
                 "options": options,
-                "description": description,
+                "description": description
             },
             ogg_service="recvsrvr",
             if_exists=if_exists,
@@ -11077,8 +11962,8 @@ class OGGRestAPI:
                     "options": {
                         "network": {
                             "appOptions": {
-                                "appFlushBytes": "24859",
-                                "appFlushSecs": "2"
+                                "appFlushBytes": 24859,
+                                "appFlushSecs": 2
                             }
                         }
                     }
@@ -11122,8 +12007,8 @@ class OGGRestAPI:
                 options={
                     "network": {
                         "appOptions": {
-                            "appFlushBytes": "24859",
-                            "appFlushSecs": "2"
+                            "appFlushBytes": 24859,
+                            "appFlushSecs": 2
                         }
                     }
                 },
@@ -11134,7 +12019,7 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/targets/{path}",
             path_params={
-                "path": path,
+                "path": path
             },
             data=data,
             body_params={
@@ -11147,7 +12032,7 @@ class OGGRestAPI:
                 "source": source,
                 "target": target,
                 "options": options,
-                "description": description,
+                "description": description
             },
             ogg_service="recvsrvr",
             raw_response=raw_response
@@ -11179,7 +12064,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/targets/{path}",
             path_params={
-                "path": path,
+                "path": path
             },
             ogg_service="recvsrvr",
             raw_response=raw_response
@@ -11211,7 +12096,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/targets/{path}/checkpoints",
             path_params={
-                "path": path,
+                "path": path
             },
             ogg_service="recvsrvr",
             raw_response=raw_response
@@ -11243,7 +12128,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/targets/{path}/info",
             path_params={
-                "path": path,
+                "path": path
             },
             ogg_service="recvsrvr",
             raw_response=raw_response
@@ -11275,7 +12160,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/targets/{path}/progress",
             path_params={
-                "path": path,
+                "path": path
             },
             ogg_service="recvsrvr",
             raw_response=raw_response
@@ -11307,7 +12192,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/targets/{path}/stats",
             path_params={
-                "path": path,
+                "path": path
             },
             ogg_service="recvsrvr",
             raw_response=raw_response
@@ -11366,7 +12251,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/tasks/{task}",
             path_params={
-                "task": task,
+                "task": task
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -11425,7 +12310,7 @@ class OGGRestAPI:
                     "schedule": {
                         "every": {
                             "units": "hours",
-                            "value": "1"
+                            "value": 1
                         }
                     },
                     "command": {
@@ -11435,7 +12320,7 @@ class OGGRestAPI:
                             {
                                 "type": "critical",
                                 "units": "seconds",
-                                "value": "5"
+                                "value": 5
                             }
                         ]
                     }
@@ -11452,7 +12337,7 @@ class OGGRestAPI:
                         {
                             "type": "critical",
                             "units": "seconds",
-                            "value": "5"
+                            "value": 5
                         }
                     ]
                 },
@@ -11460,7 +12345,7 @@ class OGGRestAPI:
                 schedule={
                     "every": {
                         "units": "hours",
-                        "value": "1"
+                        "value": 1
                     }
                 },
                 status=None,
@@ -11482,7 +12367,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/tasks/{task}",
             path_params={
-                "task": task,
+                "task": task
             },
             data=data,
             body_params={
@@ -11494,7 +12379,7 @@ class OGGRestAPI:
                 "timeout": timeout,
                 "critical": critical,
                 "restart": restart,
-                "description": description,
+                "description": description
             },
             ogg_service="adminsrvr",
             if_exists=if_exists,
@@ -11575,7 +12460,7 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/tasks/{task}",
             path_params={
-                "task": task,
+                "task": task
             },
             data=data,
             body_params={
@@ -11587,7 +12472,7 @@ class OGGRestAPI:
                 "timeout": timeout,
                 "critical": critical,
                 "restart": restart,
-                "description": description,
+                "description": description
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -11620,7 +12505,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/tasks/{task}",
             path_params={
-                "task": task,
+                "task": task
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -11653,7 +12538,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/tasks/{task}/info",
             path_params={
-                "task": task,
+                "task": task
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -11686,7 +12571,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/tasks/{task}/info/history",
             path_params={
-                "task": task,
+                "task": task
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -11719,7 +12604,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/tasks/{task}/info/status",
             path_params={
-                "task": task,
+                "task": task
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -11787,7 +12672,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/trails/{trail}",
             path_params={
-                "trail": trail,
+                "trail": trail
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -11875,14 +12760,14 @@ class OGGRestAPI:
                     "trailName": "HumanResources",
                     "name": "ea",
                     "path": "north",
-                    "sizeMB": "2000"
+                    "sizeMB": 2000
                 }
             )
 
             client.create_trail(
                 trail='trail_example',
                 space_used=None,
-                size_mb='2000',
+                size_mb=2000,
                 offset=None,
                 sequence_max_in_use=None,
                 trail_name='HumanResources',
@@ -11915,7 +12800,7 @@ class OGGRestAPI:
             method="POST",
             template="/services/{version}/trails/{trail}",
             path_params={
-                "trail": trail,
+                "trail": trail
             },
             data=data,
             body_params={
@@ -11935,7 +12820,7 @@ class OGGRestAPI:
                 "sequenceLengthFlip": sequence_length_flip,
                 "processRef": process_ref,
                 "sequenceMax": sequence_max,
-                "description": description,
+                "description": description
             },
             ogg_service="adminsrvr",
             if_exists=if_exists,
@@ -12058,7 +12943,7 @@ class OGGRestAPI:
             method="PATCH",
             template="/services/{version}/trails/{trail}",
             path_params={
-                "trail": trail,
+                "trail": trail
             },
             data=data,
             body_params={
@@ -12078,7 +12963,7 @@ class OGGRestAPI:
                 "sequenceLengthFlip": sequence_length_flip,
                 "processRef": process_ref,
                 "sequenceMax": sequence_max,
-                "description": description,
+                "description": description
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -12120,7 +13005,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/trails/{trail}",
             path_params={
-                "trail": trail,
+                "trail": trail
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -12162,7 +13047,7 @@ class OGGRestAPI:
             method="GET",
             template="/services/{version}/trails/{trail}/sequences",
             path_params={
-                "trail": trail,
+                "trail": trail
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -12204,7 +13089,7 @@ class OGGRestAPI:
             method="DELETE",
             template="/services/{version}/trails/{trail}/sequences",
             path_params={
-                "trail": trail,
+                "trail": trail
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -12215,6 +13100,7 @@ class OGGRestAPI:
         self,
         trail,
         sequence,
+        content=False,
         raw_response=False
     ):
         """
@@ -12236,6 +13122,8 @@ class OGGRestAPI:
                 human-friendly name.
                 POST operations accept only the human-friendly name. Required. Example: trail_example
             sequence (int): The trail sequence number. Required. Example: 1
+            content (bool): If True, request application/binary and return the raw content as bytes instead
+                of the metadata JSON returned by default.
             raw_response (bool): If True, return raw parsed response from _parse() instead of
                 _extract_main().
 
@@ -12250,9 +13138,11 @@ class OGGRestAPI:
             template="/services/{version}/trails/{trail}/sequences/{sequence}",
             path_params={
                 "trail": trail,
-                "sequence": sequence,
+                "sequence": sequence
             },
             ogg_service="adminsrvr",
+            content=content,
+            content_type="application/binary",
             raw_response=raw_response
         )
 
@@ -12301,7 +13191,7 @@ class OGGRestAPI:
             template="/services/{version}/trails/{trail}/sequences/{sequence}",
             path_params={
                 "trail": trail,
-                "sequence": sequence,
+                "sequence": sequence
             },
             data=data,
             ogg_service="adminsrvr",
@@ -12349,7 +13239,7 @@ class OGGRestAPI:
             template="/services/{version}/trails/{trail}/sequences/{sequence}",
             path_params={
                 "trail": trail,
-                "sequence": sequence,
+                "sequence": sequence
             },
             ogg_service="adminsrvr",
             raw_response=raw_response
@@ -12489,6 +13379,99 @@ class OGGRestAPI:
             raw_response=raw_response
         )
 
+    def kill_extract(
+        self,
+        extract,
+        raw_response=False,
+    ):
+        """Forcibly terminate an extract, bypassing a graceful STOP EXTRACT.
+
+        Use only when the extract cannot be stopped normally: unlike stop_extract,
+        this does not let the process reach a clean checkpoint before exiting.
+
+        Args:
+            extract (str): Name of the extract to kill.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the execute_command API call.
+        """
+        return self.execute_command(
+            data={
+                'name': 'kill',
+                'processType': 'extract',
+                'processName': extract
+            },
+            raw_response=raw_response
+        )
+
+    def get_current_extract_log(
+        self,
+        extract,
+        raw_response=False,
+    ):
+        """Fetch the content of an extract's current (unrotated) log.
+
+        list_extract_logs/get_extract_log require the exact revisioned log name
+        (<extract>.log for the current one, <extract>-N.log for older rotations)
+        - this resolves it instead of making the caller list first. Note the
+        info/logs resource this wraps is commonly empty on Microservices
+        deployments, which write most of what a process log would contain into
+        the extract's report (see list_extract_reports/get_extract_report) rather
+        than here; check for that if this returns None.
+
+        Args:
+            extract (str): Name of the extract.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the get_extract_log API call, or None if the extract
+            has no logs listed.
+        """
+        logs = self.list_extract_logs(extract)
+        names = [entry.get('name') for entry in logs]
+        if not names:
+            return None
+        current = f'{extract}.log'
+        if current not in names:
+            current = names[0]
+        return self.get_extract_log(
+            extract=extract,
+            log=current,
+            content=True,
+            raw_response=raw_response
+        )
+
+    def get_service_manager_log(
+        self,
+        content=True,
+        raw_response=False,
+    ):
+        """Fetch the Service Manager's own message log.
+
+        Wraps GET /services/{version}/logs/default at the Service Manager level
+        (the same generic endpoint get_log() calls, with ogg_service fixed to
+        'ServiceManager'). This is the Service Manager process's own log, not the
+        per-deployment ggserr.log - the REST API has no endpoint for ggserr.log at
+        all; it is filesystem-only (var/log/ggserr.log under the deployment home).
+        For a deployment service's own log (adminsrvr, distsrvr, recvsrvr,
+        pmsrvr), use get_service_log(deployment, service, content=True) instead.
+
+        Args:
+            content (bool, optional): If True (default), return the raw log text
+                instead of the {enabled, dataExists} metadata JSON.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+        """
+        return self.get_log(
+            log='default',
+            ogg_service='ServiceManager',
+            content=content,
+            raw_response=raw_response
+        )
+
     def restart_extract(
         self,
         extract,
@@ -12588,6 +13571,72 @@ class OGGRestAPI:
         return self.update_replicat(
             replicat=replicat,
             data={'status': 'stopped'},
+            raw_response=raw_response
+        )
+
+    def kill_replicat(
+        self,
+        replicat,
+        raw_response=False,
+    ):
+        """Forcibly terminate a replicat, bypassing a graceful STOP REPLICAT.
+
+        Use only when the replicat cannot be stopped normally: unlike stop_replicat,
+        this does not let the process reach a clean checkpoint before exiting.
+
+        Args:
+            replicat (str): Name of the replicat to kill.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the execute_command API call.
+        """
+        return self.execute_command(
+            data={
+                'name': 'kill',
+                'processType': 'replicat',
+                'processName': replicat
+            },
+            raw_response=raw_response
+        )
+
+    def get_current_replicat_log(
+        self,
+        replicat,
+        raw_response=False,
+    ):
+        """Fetch the content of a replicat's current (unrotated) log.
+
+        list_replicat_logs/get_replicat_log require the exact revisioned log name
+        (<replicat>.log for the current one, <replicat>-N.log for older
+        rotations) - this resolves it instead of making the caller list first.
+        Note the info/logs resource this wraps is commonly empty on
+        Microservices deployments, which write most of what a process log would
+        contain into the replicat's report (see
+        list_replicat_reports/get_replicat_report) rather than here; check for
+        that if this returns None.
+
+        Args:
+            replicat (str): Name of the replicat.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the get_replicat_log API call, or None if the replicat
+            has no logs listed.
+        """
+        logs = self.list_replicat_logs(replicat)
+        names = [entry.get('name') for entry in logs]
+        if not names:
+            return None
+        current = f'{replicat}.log'
+        if current not in names:
+            current = names[0]
+        return self.get_replicat_log(
+            replicat=replicat,
+            log=current,
+            content=True,
             raw_response=raw_response
         )
 
@@ -12977,7 +14026,7 @@ class OGGRestAPI:
         self.update_deployment(
             deployment,
             data={
-                'oggHome': new_home,
+                'oggHome': new_home
             }
         )
         print(f"Successfully updated home for deployment '{deployment}'.")
