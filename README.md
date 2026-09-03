@@ -5,7 +5,7 @@ A Python client for the Oracle GoldenGate REST API.
 ## Install
 
 ```bash
-pip install .
+pip install oggrestapi
 ```
 
 ## Usage
