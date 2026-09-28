@@ -15,29 +15,32 @@ from oggrestapi import OGGRestAPI
 
 # Initialize the client when using a reverse proxy
 ogg_client = OGGRestAPI(
-    url="https://vmogg",
-    username="ogg",
-    deployment="ogg_test_01",
+    url='https://vmogg',
+    username='ogg',
+    deployment='ogg_test_01',
     reverse_proxy=True
 )
 
 # Initialize the client with auto-discovery, when using the same credentials for all services
 ogg_client = OGGRestAPI(
-    url="https://vmogg:7809",
-    username="ogg",
-    deployment="ogg_test_01",
+    url='https://vmogg:7809',
+    username='ogg',
+    deployment='ogg_test_01',
     auto_discovery=True
 )
 
 # Initialize the client against a single service
 ogg_client = OGGRestAPI(
-    url="https://vmogg:7810",
-    username="ogg"
+    url='https://vmogg:7810',
+    username='ogg'
 )
 
-# Example: Get a list of all extracts
+# Example of a built-in endpoint: Get a list of all extracts
 extracts = ogg_client.list_extracts()
 
 >>> print(extracts)
 [{'name': 'EXT1', 'status': 'running'}, {'name': 'EXT2', 'status': 'running'}]
+
+# Example of a custom method: Patch all deployments of a GoldenGate setup
+>>> ogg_client.patch_deployments(new_home='/u01/app/ogg/product/23.26.3.0.4')
 ```
