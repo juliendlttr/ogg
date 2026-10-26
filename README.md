@@ -2,6 +2,8 @@
 
 A Python client for the Oracle GoldenGate REST API.
 
+More info, docs and use cases: [juliendelattre.com](https://juliendelattre.com/tools/ogg-python-client/)
+
 ## Install
 
 ```bash
