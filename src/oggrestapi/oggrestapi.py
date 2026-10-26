@@ -27,6 +27,156 @@ class OGGRestAPI:
         requests.exceptions.Timeout,
         requests.exceptions.ChunkedEncodingError,
     )
+    # Values accepted by the if_exists argument of create methods.
+    IF_EXISTS_VALUES = ('fail', 'skip', 'update', 'recreate', 'verify')
+    # Verbs available on each create endpoint's URL: 'update' (PATCH/PUT or None), 'delete', 'get'.
+    _IF_EXISTS_ENDPOINTS = {
+        '/services/{version}/authorizations/{role}/{user}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/config/files/{file}': {
+            'update': 'PUT',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/config/types/{type}': {
+            'update': None,
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/config/types/{type}/values/{value}': {
+            'update': 'PUT',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/connections/{connection}': {
+            'update': 'PUT',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/connections/{connection}/tables/checkpoint': {
+            'update': None,
+            'delete': False,
+            'get': False,
+        },
+        '/services/{version}/connections/{connection}/tables/heartbeat': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/credentials/{domain}/{alias}': {
+            'update': 'PUT',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/deployments/{deployment}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/deployments/{deployment}/authorization/profiles/{profile}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/deployments/{deployment}/certificates/{type}/{certificate}': {
+            'update': 'PUT',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/deployments/{deployment}/plugin/templates/{plugin}': {
+            'update': 'PUT',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/deployments/{deployment}/services/{service}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/enckeys/{key_name}': {
+            'update': None,
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/encryption/profiles/{profile}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/extracts/{extract}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/installation/aiservice/models/{model}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/installation/aiservice/providers/{provider}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/installation/cluster': {
+            'update': None,
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/replicats/{replicat}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/sources/{distpath}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/stream/{stream_name}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/targets/{path}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/tasks/{task}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/trails/{trail}': {
+            'update': 'PATCH',
+            'delete': True,
+            'get': True,
+        },
+        '/services/{version}/trails/{trail}/sequences/{sequence}': {
+            'update': None,
+            'delete': True,
+            'get': True,
+        },
+    }
+    _CHECKPOINT_TABLE_TEMPLATE = '/services/{version}/connections/{connection}/tables/checkpoint'
+    _EXTRACT_TEMPLATE = '/services/{version}/extracts/{extract}'
+    # A user also contains the undocumented 'all' role: until it is deleted there too, a create still 409s.
+    _USER_TEMPLATE = '/services/{version}/authorizations/{role}/{user}'
+    _REPLICAT_TEMPLATE = '/services/{version}/replicats/{replicat}'
+    # Seconds if_exists='recreate' waits between deleting and creating an extract or replicat.
+    recreate_wait_seconds = 20
+    # Deleting these takes everything they contain (a deployment's processes, a whole cluster), so no recreate.
+    _RECREATE_REFUSED = frozenset(
+        {'/services/{version}/deployments/{deployment}', '/services/{version}/installation/cluster'}
+    )
+    # Fields if_exists='verify' never compares: server-managed, or secrets the server never returns.
+    _VERIFY_IGNORED_FIELDS = frozenset({'$schema', 'status', 'password', 'credential'})
+    # Fields an update PATCH keeps even when unchanged: schemas such as ogg:encryptionProfile need them to match.
+    _PATCH_ALWAYS_SENT = ('$schema', 'type')
 
     def __init__(
         self,
@@ -48,7 +198,7 @@ class OGGRestAPI:
         Args:
             url (str): Base URL of the OGG REST API. It can be 'http(s)://hostname:port' without
                 NGINX reverse proxy, 'https://nginx_host:nginx_port' with NGINX reverse proxy, or
-                the Service Manager's own 'http(s)://hostname:port' with auto_discovery=True.
+                the Service Manager's 'http(s)://hostname:port' with auto_discovery=True.
             username (str): Service username.
             password (str, optional): Service password. If omitted, the user is prompted to
                 enter it securely (input is not echoed).
@@ -59,7 +209,7 @@ class OGGRestAPI:
             reverse_proxy (bool, optional): Whether to use NGINX reverse proxy. Defaults to False.
             auto_discovery (bool, optional): Reach every microservice of `deployment` from a
                 single client pointed at the Service Manager, without a reverse proxy, by looking
-                up each service's own port on first use. Mutually exclusive with reverse_proxy.
+                up each service's port on first use. Mutually exclusive with reverse_proxy.
                 Defaults to False.
             verify_ssl (bool, optional): Whether to verify SSL certs. Defaults to True.
             test_connection (bool, optional): If True, will attempt to retrieve API versions on
@@ -70,7 +220,7 @@ class OGGRestAPI:
                 succeeds. Off by default so scripts built on this client stay quiet unless asked
                 to be chatty.
         """
-        self.swagger_version = '2026.01.27'
+        self.swagger_version = '2026.01.27+23.26.4.0.0'
         self.version = version
         self.base_url = url
         self.username = username
@@ -81,14 +231,14 @@ class OGGRestAPI:
         self.deployment = deployment
         self.reverse_proxy = reverse_proxy
         self.auto_discovery = auto_discovery
-        # (deployment, service name) -> its own discovered base_url, filled in lazily by
-        # _service_base_url() the first time each deployment/service pair is actually used.
+        # (deployment, service name) -> its discovered base_url, filled in lazily by
+        # _service_base_url() the first time each deployment/service pair is used.
         self._service_urls = {}
         if reverse_proxy and auto_discovery:
             message = 'reverse_proxy and auto_discovery are mutually exclusive. Pick one.'
             raise ValueError(message)
         if deployment and not reverse_proxy and not auto_discovery:
-            # Without a reverse proxy or auto-discovery, every microservice listens on its own
+            # Without a reverse proxy or auto-discovery, every microservice listens by itself
             # port and the URL space is flat (/services/v2/...), so a deployment name has
             # nowhere to go: the deployment is selected by the port in base_url. Accepting it
             # silently would send the call to whatever base_url points at, typically the
@@ -96,7 +246,7 @@ class OGGRestAPI:
             message = (
                 f'deployment={deployment!r} requires reverse_proxy=True or auto_discovery=True. '
                 f'Without either, the deployment is selected by the port in the URL (the '
-                f"deployment's own adminsrvr port, e.g. 7810), not by name. Either pass one of "
+                f"deployment's adminsrvr port, e.g. 7810), not by name. Either pass one of "
                 f"them, or drop deployment and point url at the deployment's service port."
             )
             raise ValueError(message)
@@ -171,7 +321,7 @@ class OGGRestAPI:
         return port
 
     def _service_base_url(self, ogg_service):
-        """Resolve the base_url a request for `ogg_service` should actually go to.
+        """Resolve the base_url a request for `ogg_service` should go to.
 
         Outside auto_discovery this is always just self.base_url. Under
         auto_discovery, self.base_url is the Service Manager, and a
@@ -284,7 +434,7 @@ class OGGRestAPI:
             break
 
         if response is None:
-            # Every attempt raised a network exception; surface the last one.
+            # Every attempt raised a network exception; raise the last one.
             raise last_exc
 
         if raw_response:
@@ -365,9 +515,9 @@ class OGGRestAPI:
                 data = None
 
         # Merge query_params into params the same way body_params merges into data:
-        # query_params is the generated method's own named arguments for query-string
+        # query_params is the generated method's named arguments for query-string
         # parameters (e.g. a sequence range on a DELETE .../sequences call), only the
-        # ones actually set (not None) get added, without mutating the caller's dict.
+        # ones set (not None) get added, without mutating the caller's dict.
         if query_params:
             if params is None:
                 params = {}
@@ -379,10 +529,11 @@ class OGGRestAPI:
             if not params:
                 params = None
 
-        # If caller asked to skip on existing resource, inspect the raw response and
-        # treat a 409 (already exists) as a no-op instead of an error. Routing through
-        # _request means this path inherits the same retry handling as normal calls.
-        if if_exists == 'skip':
+        self._check_if_exists(template, if_exists)
+
+        # Any if_exists other than 'fail' inspects the raw response and handles a 409
+        # (already exists) itself. Routing through _request keeps the retry handling.
+        if if_exists != 'fail':
             response = self._request(method, path, ogg_service=ogg_service, params=params, data=data, raw_response=True)
             parsed = self._parse(response)
 
@@ -393,8 +544,11 @@ class OGGRestAPI:
                         if isinstance(m, dict) and m.get('title'):
                             titles.append(m['title'])
                 message = '; '.join(titles) if titles else 'Resource exists'
-                logger.info('%s (if_exists set to skip)', message)
-                return {'status': 'skipped', 'message': message, 'http_status': 409, 'raw': parsed}
+                logger.info('%s (if_exists set to %s)', message, if_exists)
+                if if_exists == 'skip':
+                    return {'status': 'skipped', 'message': message, 'http_status': 409, 'raw': parsed}
+                call_kwargs = {'ogg_service': ogg_service, 'path_params': path_params, 'params': params}
+                return self._resolve_existing(if_exists, method, template, data, message, call_kwargs)
 
             # Otherwise behave like normal _call: raise on errors, return parsed or extracted
             self._check_response(response, url)
@@ -414,6 +568,106 @@ class OGGRestAPI:
             content_type=content_type,
         )
         return result
+
+    def _check_if_exists(self, template, if_exists):
+        """Raise ValueError for an if_exists value that is unknown or that this endpoint cannot honor."""
+        if if_exists not in self.IF_EXISTS_VALUES:
+            message = f'if_exists={if_exists!r} is not one of {", ".join(self.IF_EXISTS_VALUES)}.'
+            raise ValueError(message)
+        if if_exists in ('fail', 'skip'):
+            return
+        if if_exists == 'recreate' and template in self._RECREATE_REFUSED:
+            message = f"if_exists='recreate' is refused for {template}: deleting it removes everything it contains."
+            raise ValueError(message)
+        verbs = self._IF_EXISTS_ENDPOINTS.get(template, {})
+        if template == self._CHECKPOINT_TABLE_TEMPLATE:
+            supported = if_exists == 'recreate'
+        elif if_exists == 'update':
+            supported = bool(verbs.get('update'))
+        elif if_exists == 'recreate':
+            supported = verbs.get('delete', False)
+        else:
+            supported = verbs.get('get', False)
+        if not supported:
+            message = f'if_exists={if_exists!r} is not supported for {template}: no matching endpoint on its URL.'
+            raise ValueError(message)
+
+    def _resolve_existing(self, if_exists, method, template, data, message, call_kwargs):
+        """Handle a 409 for if_exists='update'/'recreate'/'verify' and return a status dict."""
+        if if_exists == 'update':
+            verb = self._IF_EXISTS_ENDPOINTS[template]['update']
+            body = data
+            if verb == 'PATCH' and isinstance(data, dict):
+                # PATCH only the changed fields: resending an unchanged immutable field can be refused.
+                existing = self._call('GET', template, **call_kwargs) or {}
+                body = {key: value for key, value in data.items() if existing.get(key) != value}
+                if not body:
+                    return {'status': 'unchanged', 'message': message, 'http_status': 409, 'raw': existing}
+                body.update({key: data[key] for key in self._PATCH_ALWAYS_SENT if key in data})
+            result = self._call(verb, template, data=body, **call_kwargs)
+            return {'status': 'updated', 'message': message, 'http_status': 409, 'raw': result}
+
+        if if_exists == 'recreate':
+            if template == self._CHECKPOINT_TABLE_TEMPLATE:
+                self._call('POST', template, data=dict(data or {}, operation='delete'), **call_kwargs)
+            else:
+                # An extract's trail files persist through delete_extract, so they are purged before the new one writes.
+                trails = []
+                if template == self._EXTRACT_TEMPLATE:
+                    existing = self._call('GET', template, **call_kwargs) or {}
+                    trails = [t for t in existing.get('targets') or [] if not t.get('remote')]
+                self._call('DELETE', template, **call_kwargs)
+                if template == self._USER_TEMPLATE:
+                    all_role = dict(call_kwargs, path_params=dict(call_kwargs['path_params'], role='all'))
+                    self._call('DELETE', template, **all_role)
+                if template in (self._EXTRACT_TEMPLATE, self._REPLICAT_TEMPLATE):
+                    time.sleep(self.recreate_wait_seconds)
+                for trail in trails:
+                    self.purge_trail(trail['name'], path=trail.get('path'), use_checkpoints=False)
+            result = self._call(method, template, data=data, **call_kwargs)
+            return {'status': 'recreated', 'message': message, 'http_status': 409, 'raw': result}
+
+        existing = self._call('GET', template, **call_kwargs)
+        differences = self._verify_differences(data or {}, existing or {})
+        if differences:
+            error = f'{message} Existing resource differs from the request: {"; ".join(differences)}'
+            raise RuntimeError(error)
+        return {'status': 'verified', 'message': message, 'http_status': 409, 'raw': existing}
+
+    def _verify_differences(self, requested, existing, prefix=''):
+        """List the requested fields whose existing value differs, for if_exists='verify'.
+
+        A requested top-level field missing from the resource is a difference; nested ones are not compared,
+        since the server leaves out defaults there.
+        A list of strings passes when every requested line is present, since the server adds lines.
+        """
+        differences = []
+        for key, wanted in requested.items():
+            if key in self._VERIFY_IGNORED_FIELDS:
+                continue
+            if key not in existing:
+                if not prefix:
+                    differences.append(f'{key}: requested {wanted!r}, missing from the existing resource')
+                continue
+            actual = existing[key]
+            label = f'{prefix}{key}'
+            if isinstance(wanted, dict) and isinstance(actual, dict):
+                differences += self._verify_differences(wanted, actual, f'{label}.')
+            elif isinstance(wanted, list) and isinstance(actual, list) and all(isinstance(w, str) for w in wanted):
+                missing = [w for w in wanted if w not in actual]
+                if missing:
+                    differences.append(f'{label}: missing {missing!r}')
+            elif (
+                isinstance(wanted, list)
+                and isinstance(actual, list)
+                and len(wanted) == len(actual)
+                and all(isinstance(w, dict) and isinstance(a, dict) for w, a in zip(wanted, actual))  # noqa: B905, strict= needs 3.10, repo targets 3.6
+            ):
+                for index, (w, a) in enumerate(zip(wanted, actual)):  # noqa: B905
+                    differences += self._verify_differences(w, a, f'{label}[{index}].')
+            elif wanted != actual:
+                differences.append(f'{label}: requested {wanted!r}, existing {actual!r}')
+        return differences
 
     def _get(self, path, params=None, raw_response=False):
         return self._request('GET', path, params=params, raw_response=raw_response)
@@ -448,8 +702,10 @@ class OGGRestAPI:
                 error_messages.append(f'{severity} (code {response.status_code}) - {url}: {title}')
             raise RuntimeError(' ; '.join(error_messages))
 
+        # Some endpoints (e.g. the AI service) answer an error with an empty messages list.
         logger.error('HTTP %s: %s', response.status_code, response.text)
-        response.raise_for_status()
+        message = f'ERROR (code {response.status_code}) - {url}: {response.reason}'
+        raise RuntimeError(message)
 
     def _parse(self, response):
         try:
@@ -473,7 +729,7 @@ class OGGRestAPI:
             return result
 
         resp = result.get('response', result)
-        if 'items' not in resp:
+        if not isinstance(resp, dict) or 'items' not in resp:
             return resp
 
         exclude = {'links', '$schema'}
@@ -541,7 +797,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/aiservice/models
-    def list_ai_service_models(
+    def list_deployment_ai_service_models(
         self,
         raw_response=False,
     ):
@@ -555,7 +811,7 @@ class OGGRestAPI:
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
 
         Example:
-            client.list_ai_service_models()
+            client.list_deployment_ai_service_models()
 
         """
         return self._call(
@@ -566,7 +822,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/aiservice/models/{model}
-    def get_ai_service_model(
+    def get_deployment_ai_service_model(
         self,
         model,
         raw_response=False,
@@ -582,7 +838,7 @@ class OGGRestAPI:
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
 
         Example:
-            client.get_ai_service_model(
+            client.get_deployment_ai_service_model(
                 model='model_example'
             )
         """
@@ -826,7 +1082,9 @@ class OGGRestAPI:
             data (dict): Data payload. See call example below for more details.
             ogg_service (str): Service name used (only needed with a reverse proxy). Example: adminsrvr
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_user(
@@ -1238,7 +1496,9 @@ class OGGRestAPI:
                 provided.
             ogg_service (str): Service name used (only needed with a reverse proxy). Example: adminsrvr
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_configuration_file(
@@ -1534,7 +1794,9 @@ class OGGRestAPI:
             data (dict): Data payload. See call example below for more details.
             ogg_service (str): Service name used (only needed with a reverse proxy). Example: adminsrvr
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_config_type(
@@ -1711,7 +1973,9 @@ class OGGRestAPI:
             data (dict): Data payload. See call example below for more details.
             ogg_service (str): Service name used (only needed with a reverse proxy). Example: adminsrvr
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_config_value(
@@ -1912,7 +2176,9 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_connection(
@@ -2312,21 +2578,23 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.manage_checkpoint_table(
                 connection='OracleGoldenGate.db_target',
                 data={
                     "operation": "add",
-                    "name": "ggadmin.ggs_checkpoint"
+                    "name": "ggadmin.checkpoint"
                 }
             )
 
             client.manage_checkpoint_table(
                 connection='OracleGoldenGate.db_target',
                 operation='add',
-                name='ggadmin.ggs_checkpoint'
+                name='ggadmin.checkpoint'
             )
         """
         return self._call(
@@ -2417,7 +2685,9 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_heartbeat_table(
@@ -2947,6 +3217,7 @@ class OGGRestAPI:
         alias,
         userid=None,
         password=None,
+        type=None,
         data=None,
         raw_response=False,
         if_exists='fail',
@@ -2962,10 +3233,13 @@ class OGGRestAPI:
             alias (str): Credential store alias. Required. Example: ggnorth
             userid (str):  Example: 1
             password (str):  Example: password_example
+            type (str):  Example: PASSWORD
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_alias(
@@ -2981,7 +3255,8 @@ class OGGRestAPI:
                 domain='OracleGoldenGate',
                 alias='ggnorth',
                 userid='c##ggadmin@//server1.dc1.north.example.com:1521/ORCLCDB',
-                password='password-DB_A1'
+                password='password-DB_A1',
+                type=None
             )
         """
         return self._call(
@@ -2995,6 +3270,7 @@ class OGGRestAPI:
             body_params={
                 'userid': userid,
                 'password': password,
+                'type': type,
             },
             ogg_service='adminsrvr',
             if_exists=if_exists,
@@ -3043,6 +3319,7 @@ class OGGRestAPI:
         alias,
         userid=None,
         password=None,
+        type=None,
         data=None,
         raw_response=False,
     ):
@@ -3057,6 +3334,7 @@ class OGGRestAPI:
             alias (str): Credential store alias. Required. Example: ggnorth
             userid (str):  Example: 1
             password (str):  Example: password_example
+            type (str):  Example: PASSWORD
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
@@ -3075,7 +3353,8 @@ class OGGRestAPI:
                 domain='OracleGoldenGate',
                 alias='ggnorth',
                 userid='ggadmin@//server1.dc1.west.example.com:1521/dbwest_pdb1',
-                password='password-DB_A1'
+                password='password-DB_A1',
+                type=None
             )
         """
         return self._call(
@@ -3089,6 +3368,7 @@ class OGGRestAPI:
             body_params={
                 'userid': userid,
                 'password': password,
+                'type': type,
             },
             ogg_service='adminsrvr',
             raw_response=raw_response,
@@ -3306,6 +3586,7 @@ class OGGRestAPI:
         reinitialize=None,
         type=None,
         repair=None,
+        collector_compact_queue_limit=None,
         data=None,
         raw_response=False,
     ):
@@ -3329,6 +3610,8 @@ class OGGRestAPI:
             type (str): The type of datastore storage, either Berkeley Database (BDB) or Lightning Memory-Mapped
                 Database (LMDB). Required if not included in `data`. Example: BDB
             repair (bool): If set to true, the datastore will be repaired upon restart. Example: True
+            collector_compact_queue_limit (int): Mpoint Collector Queue max size while datastore is compacting. Example:
+                50000
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
@@ -3354,7 +3637,8 @@ class OGGRestAPI:
                 data_store_max_dbs=5000,
                 reinitialize=None,
                 type='LMDB',
-                repair=None
+                repair=None,
+                collector_compact_queue_limit=None
             )
         """
         return self._call(
@@ -3371,6 +3655,7 @@ class OGGRestAPI:
                 'reinitialize': reinitialize,
                 'type': type,
                 'repair': repair,
+                'collectorCompactQueueLimit': collector_compact_queue_limit,
             },
             ogg_service='pmsrvr',
             raw_response=raw_response,
@@ -3483,7 +3768,9 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_deployment(
@@ -3807,7 +4094,9 @@ class OGGRestAPI:
             profile (str): Name of Authorization profile. Required. Example: profile_example
             data (dict): Data payload. See call example below for more details.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_authorization_profile(
@@ -4082,7 +4371,9 @@ class OGGRestAPI:
             certificate (str): Deployment certificate name. Required. Example: certificate_example
             data (dict): Data payload. See call example below for more details.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_deployment_certificate(
@@ -4328,12 +4619,13 @@ class OGGRestAPI:
         Args:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example: ogg_test_01
             plugin (str): Name of plugin for the template. Required. Example: plugin_example
-            metadata (list): Array of metadata key/value pairs. Required if not included in `data`. Example:
-                metadata_example
+            metadata (list): Deployment metadata. Required if not included in `data`. Example: metadata_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_plugin_template(
@@ -4446,8 +4738,7 @@ class OGGRestAPI:
         Args:
             deployment (str): Name for the Oracle GoldenGate deployment. Required. Example: ogg_test_01
             plugin (str): Name of plugin for the template. Required. Example: plugin_example
-            metadata (list): Array of metadata key/value pairs. Required if not included in `data`. Example:
-                metadata_example
+            metadata (list): Deployment metadata. Required if not included in `data`. Example: metadata_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
@@ -4608,7 +4899,9 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_service(
@@ -4966,7 +5259,9 @@ class OGGRestAPI:
             key_name (str): The name of the Encryption Key. Required. Example: keyName_example
             data (dict): Data payload. See call example below for more details.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_encryption_key(
@@ -5145,7 +5440,9 @@ class OGGRestAPI:
             profile (str): Name of the Encryption Profile. Required. Example: profile_example
             data (dict): Data payload. See call example below for more details.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_encryption_profile(
@@ -5363,6 +5660,7 @@ class OGGRestAPI:
         alias=None,
         credentials=None,
         description=None,
+        failover_slot=None,
         data=None,
         raw_response=False,
         if_exists='fail',
@@ -5398,10 +5696,13 @@ class OGGRestAPI:
             alias (dict):  Example: ggnorth
             credentials (dict): Credentials for source database. Example: null
             description (str): Description for the process. Example: description_example
+            failover_slot (bool): Fail over replication slot in PostgreSQL. Example: False
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_extract(
@@ -5486,7 +5787,8 @@ class OGGRestAPI:
                 credentials={
                     "alias": "ggnorth"
                 },
-                description='Region North'
+                description='Region North',
+                failover_slot=None
             )
         """
         return self._call(
@@ -5516,6 +5818,7 @@ class OGGRestAPI:
                 'alias': alias,
                 'credentials': credentials,
                 'description': description,
+                'failoverSlot': failover_slot,
             },
             ogg_service='adminsrvr',
             if_exists=if_exists,
@@ -5545,6 +5848,7 @@ class OGGRestAPI:
         alias=None,
         credentials=None,
         description=None,
+        failover_slot=None,
         data=None,
         raw_response=False,
     ):
@@ -5580,6 +5884,7 @@ class OGGRestAPI:
             alias (dict):  Example: ggnorth
             credentials (dict): Credentials for source database. Example: null
             description (str): Description for the process. Example: description_example
+            failover_slot (bool): Fail over replication slot in PostgreSQL. Example: False
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
@@ -5627,7 +5932,8 @@ class OGGRestAPI:
                     }
                 },
                 credentials=None,
-                description=None
+                description=None,
+                failover_slot=None
             )
         """
         return self._call(
@@ -5657,6 +5963,7 @@ class OGGRestAPI:
                 'alias': alias,
                 'credentials': credentials,
                 'description': description,
+                'failoverSlot': failover_slot,
             },
             ogg_service='adminsrvr',
             raw_response=raw_response,
@@ -6112,7 +6419,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/health
-    def get_installation_ai_service_health(
+    def get_ai_service_health(
         self,
         raw_response=False,
     ):
@@ -6126,7 +6433,7 @@ class OGGRestAPI:
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
 
         Example:
-            client.get_installation_ai_service_health()
+            client.get_ai_service_health()
 
         """
         return self._call(
@@ -6137,7 +6444,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/models
-    def list_installation_ai_service_models(
+    def list_ai_service_models(
         self,
         raw_response=False,
     ):
@@ -6151,7 +6458,7 @@ class OGGRestAPI:
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
 
         Example:
-            client.list_installation_ai_service_models()
+            client.list_ai_service_models()
 
         """
         return self._call(
@@ -6162,7 +6469,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/models/{model}
-    def get_installation_ai_service_model(
+    def get_ai_service_model(
         self,
         model,
         raw_response=False,
@@ -6178,7 +6485,7 @@ class OGGRestAPI:
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
 
         Example:
-            client.get_installation_ai_service_model(
+            client.get_ai_service_model(
                 model='model_example'
             )
         """
@@ -6193,7 +6500,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/models/{model}
-    def create_installation_ai_service_model(
+    def create_ai_service_model(
         self,
         model,
         capabilities=None,
@@ -6209,6 +6516,8 @@ class OGGRestAPI:
         limits=None,
         parameters=None,
         description=None,
+        model_path=None,
+        tokenizer_path=None,
         data=None,
         raw_response=False,
         if_exists='fail',
@@ -6224,8 +6533,8 @@ class OGGRestAPI:
             capabilities (list):  Example: capabilities_example
             priority (int):  Example: 1
             tasks (list):  Example: tasks_example
-            loaded (bool):  Example: True
-            provider_id (str):  Example: 1
+            loaded (bool): Runtime model loaded state (read-only). Example: True
+            provider_id (str): Required if not included in `data`. Example: 1
             enabled (bool):  Example: True
             id (str):  Example: 1
             name (str):  Example: name_example
@@ -6234,13 +6543,17 @@ class OGGRestAPI:
             limits (dict):  Example: limits_example
             parameters (dict):  Example: parameters_example
             description (str):  Example: description_example
+            model_path (str):  Example: modelPath_example
+            tokenizer_path (str):  Example: tokenizerPath_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
-            client.create_installation_ai_service_model(
+            client.create_ai_service_model(
                 model='model_example',
                 data={
                     "name": "Voyage 2",
@@ -6256,7 +6569,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.create_installation_ai_service_model(
+            client.create_ai_service_model(
                 model='model_example',
                 capabilities=[
                     "embed"
@@ -6276,7 +6589,9 @@ class OGGRestAPI:
                     "maxInputCharacters": 20000
                 },
                 parameters={},
-                description='Voyage embedding model for regression'
+                description='Voyage embedding model for regression',
+                model_path=None,
+                tokenizer_path=None
             )
         """
         return self._call(
@@ -6300,6 +6615,8 @@ class OGGRestAPI:
                 'limits': limits,
                 'parameters': parameters,
                 'description': description,
+                'modelPath': model_path,
+                'tokenizerPath': tokenizer_path,
             },
             ogg_service='ServiceManager',
             if_exists=if_exists,
@@ -6307,7 +6624,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/models/{model}
-    def update_installation_ai_service_model(
+    def update_ai_service_model(
         self,
         model,
         capabilities=None,
@@ -6323,6 +6640,8 @@ class OGGRestAPI:
         limits=None,
         parameters=None,
         description=None,
+        model_path=None,
+        tokenizer_path=None,
         data=None,
         raw_response=False,
     ):
@@ -6337,8 +6656,8 @@ class OGGRestAPI:
             capabilities (list):  Example: capabilities_example
             priority (int):  Example: 1
             tasks (list):  Example: tasks_example
-            loaded (bool):  Example: True
-            provider_id (str):  Example: 1
+            loaded (bool): Runtime model loaded state (read-only). Example: True
+            provider_id (str): Required if not included in `data`. Example: 1
             enabled (bool):  Example: True
             id (str):  Example: 1
             name (str):  Example: name_example
@@ -6347,12 +6666,14 @@ class OGGRestAPI:
             limits (dict):  Example: limits_example
             parameters (dict):  Example: parameters_example
             description (str):  Example: description_example
+            model_path (str):  Example: modelPath_example
+            tokenizer_path (str):  Example: tokenizerPath_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
 
         Example:
-            client.update_installation_ai_service_model(
+            client.update_ai_service_model(
                 model='model_example',
                 data={
                     "name": "Voyage 2",
@@ -6368,7 +6689,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.update_installation_ai_service_model(
+            client.update_ai_service_model(
                 model='model_example',
                 capabilities=[
                     "embed"
@@ -6388,7 +6709,9 @@ class OGGRestAPI:
                     "maxInputCharacters": 20000
                 },
                 parameters={},
-                description='Voyage embedding model for regression'
+                description='Voyage embedding model for regression',
+                model_path=None,
+                tokenizer_path=None
             )
         """
         return self._call(
@@ -6412,13 +6735,15 @@ class OGGRestAPI:
                 'limits': limits,
                 'parameters': parameters,
                 'description': description,
+                'modelPath': model_path,
+                'tokenizerPath': tokenizer_path,
             },
             ogg_service='ServiceManager',
             raw_response=raw_response,
         )
 
     # Endpoint: /services/{version}/installation/aiservice/models/{model}
-    def delete_installation_ai_service_model(
+    def delete_ai_service_model(
         self,
         model,
         raw_response=False,
@@ -6434,7 +6759,7 @@ class OGGRestAPI:
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
 
         Example:
-            client.delete_installation_ai_service_model(
+            client.delete_ai_service_model(
                 model='model_example'
             )
         """
@@ -6449,7 +6774,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/providers
-    def list_installation_ai_service_providers(
+    def list_ai_service_providers(
         self,
         raw_response=False,
     ):
@@ -6463,7 +6788,7 @@ class OGGRestAPI:
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
 
         Example:
-            client.list_installation_ai_service_providers()
+            client.list_ai_service_providers()
 
         """
         return self._call(
@@ -6474,7 +6799,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/providers/{provider}
-    def get_installation_ai_service_provider(
+    def get_ai_service_provider(
         self,
         provider,
         raw_response=False,
@@ -6490,7 +6815,7 @@ class OGGRestAPI:
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
 
         Example:
-            client.get_installation_ai_service_provider(
+            client.get_ai_service_provider(
                 provider='provider_example'
             )
         """
@@ -6505,7 +6830,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/providers/{provider}
-    def create_installation_ai_service_provider(
+    def create_ai_service_provider(
         self,
         provider,
         capabilities=None,
@@ -6551,10 +6876,12 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
-            client.create_installation_ai_service_provider(
+            client.create_ai_service_provider(
                 provider='provider_example',
                 data={
                     "name": "Voyage AI",
@@ -6568,7 +6895,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.create_installation_ai_service_provider(
+            client.create_ai_service_provider(
                 provider='provider_example',
                 capabilities=[
                     None
@@ -6633,7 +6960,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/providers/{provider}
-    def update_installation_ai_service_provider(
+    def update_ai_service_provider(
         self,
         provider,
         capabilities=None,
@@ -6680,7 +7007,7 @@ class OGGRestAPI:
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
 
         Example:
-            client.update_installation_ai_service_provider(
+            client.update_ai_service_provider(
                 provider='provider_example',
                 data={
                     "authentication": {
@@ -6690,7 +7017,7 @@ class OGGRestAPI:
                 }
             )
 
-            client.update_installation_ai_service_provider(
+            client.update_ai_service_provider(
                 provider='provider_example',
                 capabilities=[
                     None
@@ -6754,7 +7081,7 @@ class OGGRestAPI:
         )
 
     # Endpoint: /services/{version}/installation/aiservice/providers/{provider}
-    def delete_installation_ai_service_provider(
+    def delete_ai_service_provider(
         self,
         provider,
         raw_response=False,
@@ -6770,7 +7097,7 @@ class OGGRestAPI:
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
 
         Example:
-            client.delete_installation_ai_service_provider(
+            client.delete_ai_service_provider(
                 provider='provider_example'
             )
         """
@@ -6845,7 +7172,9 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_cluster(
@@ -6956,7 +7285,6 @@ class OGGRestAPI:
         data_plane=None,
         data=None,
         raw_response=False,
-        if_exists='fail',
     ):
         """
         Service Manager/Cluster Management
@@ -6969,11 +7297,10 @@ class OGGRestAPI:
                 Example: memberName_example
             region (str): The region of the new cluster member. Required if not included in `data`. Example:
                 region_example
-            availability_domain (str): The availability domain of the cluster member. Required if not included in
-                `data`. Example: availabilityDomain_example
-            fqdn (dict): The FQDN of the host. Required if not included in `data`. Example: fqdn_example
-            uses_reverse_proxy (bool): Whether the installation is behind a reverse proxy or not. Required if not
-                included in `data`. Example: False
+            availability_domain (str): The availability domain of the cluster member. Example:
+                availabilityDomain_example
+            fqdn (dict): The FQDN of the host. Example: fqdn_example
+            uses_reverse_proxy (bool): Whether the installation is behind a reverse proxy or not. Example: False
             back_plane (dict): The address of the listener on the new member for intra-cluster member communication.
                 Required if not included in `data`. Example: backPlane_example
             data_plane (dict): The listener on the new member for serving cluster data requests. Example:
@@ -6981,7 +7308,6 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
 
         Example:
             client.add_cluster_member(
@@ -7029,7 +7355,6 @@ class OGGRestAPI:
                 'dataPlane': data_plane,
             },
             ogg_service='ServiceManager',
-            if_exists=if_exists,
             raw_response=raw_response,
         )
 
@@ -7083,8 +7408,9 @@ class OGGRestAPI:
         Args:
             member (str): Name of the OGG Cluster member. Required. Example: member_example
             member_name (str): The name of the cluster member. Example: memberName_example
-            current (str): Member role. Example: standalone
-            target (str): Member role. Example: standalone
+            current (str): The current role of the cluster member. Example: initialized
+            target (str): The target role of the cluster member, in the case a transition is in progress. Example:
+                initialized
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
@@ -7266,7 +7592,6 @@ class OGGRestAPI:
         replaced=None,
         data=None,
         raw_response=False,
-        if_exists='fail',
     ):
         """
         Service Manager/Installation
@@ -7291,7 +7616,6 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
 
         Example:
             client.create_configuration_service_backend(
@@ -7349,7 +7673,6 @@ class OGGRestAPI:
                 'replaced': replaced,
             },
             ogg_service='ServiceManager',
-            if_exists=if_exists,
             raw_response=raw_response,
         )
 
@@ -7941,7 +8264,6 @@ class OGGRestAPI:
     def create_master_key_version(
         self,
         raw_response=False,
-        if_exists='fail',
     ):
         """
         Administration Service/Master Keys
@@ -7951,7 +8273,6 @@ class OGGRestAPI:
 
         Args:
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
 
         Example:
             client.create_master_key_version()
@@ -7961,7 +8282,6 @@ class OGGRestAPI:
             method='POST',
             template='/services/{version}/masterkey',
             ogg_service='adminsrvr',
-            if_exists=if_exists,
             raw_response=raw_response,
         )
 
@@ -9985,7 +10305,9 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_replicat(
@@ -10008,7 +10330,7 @@ class OGGRestAPI:
                         "path": "ggnorth/"
                     },
                     "checkpoint": {
-                        "table": "ggadmin.ggs_checkpoint"
+                        "table": "ggadmin.checkpoint"
                     }
                 }
             )
@@ -10032,7 +10354,7 @@ class OGGRestAPI:
                 managed_process_settings=None,
                 intent=None,
                 checkpoint={
-                    "table": "ggadmin.ggs_checkpoint"
+                    "table": "ggadmin.checkpoint"
                 },
                 registration=None,
                 source={
@@ -10768,6 +11090,7 @@ class OGGRestAPI:
         target=None,
         options=None,
         description=None,
+        managed_path_settings=None,
         data=None,
         raw_response=False,
         if_exists='fail',
@@ -10792,10 +11115,14 @@ class OGGRestAPI:
             target (dict): target endpoint of the path. Example: target_example
             options (dict): options for the distribution path. Example: options_example
             description (str): Description for the path. Example: description_example
+            managed_path_settings (str): Control the auto-start and auto-restart settings of the path. Example:
+                managedPathSettings_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_distribution_path(
@@ -10864,7 +11191,8 @@ class OGGRestAPI:
                     "eofDelayCSecs": None,
                     "checkpointFrequency": None
                 },
-                description='my test distPath'
+                description='my test distPath',
+                managed_path_settings=None
             )
         """
         return self._call(
@@ -10885,6 +11213,7 @@ class OGGRestAPI:
                 'target': target,
                 'options': options,
                 'description': description,
+                'managedPathSettings': managed_path_settings,
             },
             ogg_service='distsrvr',
             if_exists=if_exists,
@@ -10905,6 +11234,7 @@ class OGGRestAPI:
         target=None,
         options=None,
         description=None,
+        managed_path_settings=None,
         data=None,
         raw_response=False,
     ):
@@ -10929,6 +11259,8 @@ class OGGRestAPI:
             target (dict): target endpoint of the path. Example: target_example
             options (dict): options for the distribution path. Example: options_example
             description (str): Description for the path. Example: description_example
+            managed_path_settings (str): Control the auto-start and auto-restart settings of the path. Example:
+                managedPathSettings_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
@@ -10999,7 +11331,8 @@ class OGGRestAPI:
                     "eofDelayCSecs": None,
                     "checkpointFrequency": None
                 },
-                description=None
+                description=None,
+                managed_path_settings=None
             )
         """
         return self._call(
@@ -11020,6 +11353,7 @@ class OGGRestAPI:
                 'target': target,
                 'options': options,
                 'description': description,
+                'managedPathSettings': managed_path_settings,
             },
             ogg_service='distsrvr',
             raw_response=raw_response,
@@ -11249,7 +11583,9 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_data_stream(
@@ -11621,6 +11957,7 @@ class OGGRestAPI:
         target=None,
         options=None,
         description=None,
+        managed_path_settings=None,
         data=None,
         raw_response=False,
         if_exists='fail',
@@ -11645,10 +11982,14 @@ class OGGRestAPI:
             target (dict): target endpoint of the path. Example: target_example
             options (dict): options for the distribution path. Example: options_example
             description (str): Description for the path. Example: description_example
+            managed_path_settings (str): Control the auto-start and auto-restart settings of the path. Example:
+                managedPathSettings_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_receiver_path(
@@ -11717,7 +12058,8 @@ class OGGRestAPI:
                     "eofDelayCSecs": None,
                     "checkpointFrequency": None
                 },
-                description='my test distPath'
+                description='my test distPath',
+                managed_path_settings=None
             )
         """
         return self._call(
@@ -11738,6 +12080,7 @@ class OGGRestAPI:
                 'target': target,
                 'options': options,
                 'description': description,
+                'managedPathSettings': managed_path_settings,
             },
             ogg_service='recvsrvr',
             if_exists=if_exists,
@@ -11758,6 +12101,7 @@ class OGGRestAPI:
         target=None,
         options=None,
         description=None,
+        managed_path_settings=None,
         data=None,
         raw_response=False,
     ):
@@ -11781,6 +12125,8 @@ class OGGRestAPI:
             target (dict): target endpoint of the path. Example: target_example
             options (dict): options for the distribution path. Example: options_example
             description (str): Description for the path. Example: description_example
+            managed_path_settings (str): Control the auto-start and auto-restart settings of the path. Example:
+                managedPathSettings_example
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
@@ -11842,7 +12188,8 @@ class OGGRestAPI:
                         }
                     }
                 },
-                description=None
+                description=None,
+                managed_path_settings=None
             )
         """
         return self._call(
@@ -11863,6 +12210,7 @@ class OGGRestAPI:
                 'target': target,
                 'options': options,
                 'description': description,
+                'managedPathSettings': managed_path_settings,
             },
             ogg_service='recvsrvr',
             raw_response=raw_response,
@@ -12118,7 +12466,9 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_task(
@@ -12564,7 +12914,9 @@ class OGGRestAPI:
             data (dict): Override body payload with a raw dict. Individual parameters are merged into this dict when
                 provided.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_trail(
@@ -13031,7 +13383,9 @@ class OGGRestAPI:
             sequence (int): The trail sequence number. Required. Example: 1
             data (dict): Data payload. See call example below for more details.
             raw_response (bool): If True, return raw parsed response from _parse() instead of _extract_main().
-            if_exists (str): Action if resource exists: 'fail' (error) or 'skip' (no action). Example: skip
+            if_exists (str): Action if resource exists: 'fail' (error), 'skip' (no action), 'update' (PUT with the same
+                data, or PATCH of the changed fields only), 'recreate' (delete, then create again) or 'verify' (error if
+                the existing resource differs from data). Example: skip
 
         Example:
             client.create_trail_sequence(
@@ -13251,7 +13605,7 @@ class OGGRestAPI:
         """Forcibly terminate an extract, bypassing a graceful STOP EXTRACT.
 
         Use only when the extract cannot be stopped normally: unlike stop_extract,
-        this does not let the process reach a clean checkpoint before exiting.
+        this does not let the process reach a consistent checkpoint before exiting.
 
         Args:
             extract (str): Name of the extract to kill.
@@ -13279,11 +13633,7 @@ class OGGRestAPI:
 
         list_extract_logs/get_extract_log require the exact revisioned log name
         (<extract>.log for the current one, <extract>-N.log for older rotations)
-        - this resolves it instead of making the caller list first. Note the
-        info/logs resource this wraps is commonly empty on Microservices
-        deployments, which write most of what a process log would contain into
-        the extract's report (see list_extract_reports/get_extract_report) rather
-        than here; check for that if this returns None.
+        - this resolves it instead of making the caller list first.
 
         Args:
             extract (str): Name of the extract.
@@ -13442,12 +13792,12 @@ class OGGRestAPI:
         content=True,
         raw_response=False,
     ):
-        """Fetch the Service Manager's own message log.
+        """Fetch the Service Manager's message log.
 
         Wraps GET /services/{version}/logs/default at the Service Manager level
         (the same generic endpoint get_log() calls, with ogg_service fixed to
         'ServiceManager'). This retrieves ServiceManager.log.
-        For a deployment service's own log (adminsrvr, distsrvr, recvsrvr,
+        For a deployment service's log (adminsrvr, distsrvr, recvsrvr,
         pmsrvr), use get_service_log(deployment, service, content=True) instead.
 
         Args:
@@ -13608,7 +13958,7 @@ class OGGRestAPI:
         """Forcibly terminate a replicat, bypassing a graceful STOP REPLICAT.
 
         Use only when the replicat cannot be stopped normally: unlike stop_replicat,
-        this does not let the process reach a clean checkpoint before exiting.
+        this does not let the process reach a consistent checkpoint before exiting.
 
         Args:
             replicat (str): Name of the replicat to kill.
@@ -13637,11 +13987,6 @@ class OGGRestAPI:
         list_replicat_logs/get_replicat_log require the exact revisioned log name
         (<replicat>.log for the current one, <replicat>-N.log for older
         rotations) - this resolves it instead of making the caller list first.
-        Note the info/logs resource this wraps is commonly empty on
-        Microservices deployments, which write most of what a process log would
-        contain into the replicat's report (see
-        list_replicat_reports/get_replicat_report) rather than here; check for
-        that if this returns None.
 
         Args:
             replicat (str): Name of the replicat.
@@ -13889,6 +14234,237 @@ class OGGRestAPI:
             data={'status': 'stopped'},
             raw_response=raw_response,
         )
+
+    def purge_trail(
+        self,
+        trail,
+        path=None,
+        keep_files=0,
+        keep_hours=None,
+        keep_days=None,
+        use_checkpoints=True,
+        raw_response=False,
+    ):
+        """Purge trail files no longer needed (equivalent to PURGE EXTTRAIL in adminclient).
+
+        Wraps execute_command's purge/trails command. Files are always purged from the
+        oldest sequence forward: the keep rule and the reader checkpoints only decide
+        where the purge stops.
+
+        With use_checkpoints=True, the purge stops one sequence before the oldest
+        sequence still read by a replicat or distribution path. It is aborted for the
+        whole trail when a process using it has no valid CSN at its checkpoint
+        (OGG-30661, e.g. never started), or when the extract writing it is not running
+        (OGG-30827). On a trail no process uses, every file is purged (OGG-30424).
+
+        With use_checkpoints=False, checkpoints are ignored: the file a running extract
+        is writing is purged too, and the extract keeps writing into the deleted file.
+        Only use it on a trail whose processes are already deleted.
+
+        Args:
+            trail (str): Two-character trail name, wildcards allowed (e.g. 'a*').
+            path (str, optional): Directory of the trail, relative to the deployment's
+                data directory or absolute. Required for a trail in a subdirectory:
+                without it the purge finds no files.
+            keep_files (int, optional): Minimum number of files to keep. Defaults to 0.
+                Ignored when keep_hours or keep_days is given.
+            keep_hours (int, optional): Keep files modified within this many hours.
+            keep_days (int, optional): Keep files modified within this many days.
+            use_checkpoints (bool, optional): Keep files still needed by processes.
+                Defaults to True.
+            raw_response (bool, optional): If True, return the raw API response.
+                Defaults to False.
+
+        Returns:
+            The result of the execute_command API call. The outcome is in its messages
+            (OGG-00957 per purged file), even when nothing was purged.
+        """
+        if keep_hours is not None:
+            keep = {'type': 'min', 'units': 'hours', 'value': keep_hours}
+        elif keep_days is not None:
+            keep = {'type': 'min', 'units': 'days', 'value': keep_days}
+        else:
+            keep = {'type': 'min', 'units': 'files', 'value': keep_files}
+        target = {'name': trail}
+        if path is not None:
+            target['path'] = path
+        return self.execute_command(
+            data={
+                'name': 'purge',
+                'purgeType': 'trails',
+                'trails': [target],
+                'useCheckpoints': use_checkpoints,
+                'keep': [keep],
+            },
+            raw_response=raw_response,
+        )
+
+    def _status_lag(self, status, include_since_reported):
+        """Return lag + sinceLagReported (or lag alone) from a status dict, None if it reports no lag."""
+        lag = (status or {}).get('lag')
+        if lag is None:
+            return None
+        if include_since_reported:
+            return lag + ((status or {}).get('sinceLagReported') or 0)
+        return lag
+
+    def get_extract_lag(
+        self,
+        extract,
+        include_since_reported=True,
+    ):
+        """Return an extract's lag in seconds.
+
+        The reported lag stops changing once the process stops updating it, so sinceLagReported
+        (seconds since that value was computed) is added by default.
+
+        Args:
+            extract (str): Name of the extract.
+            include_since_reported (bool, optional): Add sinceLagReported to lag. Defaults to True.
+
+        Returns:
+            int: The lag in seconds, or None if the status reports no lag.
+        """
+        return self._status_lag(self.get_extract_status(extract), include_since_reported)
+
+    def get_replicat_lag(
+        self,
+        replicat,
+        include_since_reported=True,
+    ):
+        """Return a replicat's lag in seconds.
+
+        The reported lag stops changing once the process stops updating it, so sinceLagReported
+        (seconds since that value was computed) is added by default.
+
+        Args:
+            replicat (str): Name of the replicat.
+            include_since_reported (bool, optional): Add sinceLagReported to lag. Defaults to True.
+
+        Returns:
+            int: The lag in seconds, or None if the status reports no lag.
+        """
+        return self._status_lag(self.get_replicat_status(replicat), include_since_reported)
+
+    def get_distribution_path_lag(
+        self,
+        distpath,
+        include_since_reported=True,
+    ):
+        """Return a distribution path's lag in seconds, from get_distribution_path_info.
+
+        The reported lag stops changing once the path stops updating it, so sinceLagReported
+        (seconds since that value was computed) is added by default.
+
+        Args:
+            distpath (str): Name of the distribution path.
+            include_since_reported (bool, optional): Add sinceLagReported to lag. Defaults to True.
+
+        Returns:
+            int: The lag in seconds, or None if the path reports no lag.
+        """
+        return self._status_lag(self.get_distribution_path_info(distpath), include_since_reported)
+
+    def create_managed_process_profile(
+        self,
+        profile,
+        auto_start=False,
+        auto_start_delay=0,
+        auto_restart=False,
+        restart_on_success=False,
+        restart_delay=0,
+        restart_retries=9,
+        restart_window=60,
+        disable_on_failure=True,
+        description=None,
+        is_default=False,
+        if_exists='fail',
+    ):
+        """Create a managed process profile for extracts and replicats (equivalent to ADD PROFILE in adminclient).
+
+        Creates the ogg:managedProcessSettings value and its ogg:configDataDescription entry, as adminclient does.
+        With is_default=True, the profile becomes the deployment default and the previous default loses its
+        isDefault flag; processes that already name a profile keep it.
+        Defaults match the server's defaults for a profile.
+
+        Args:
+            profile (str): Profile name, e.g. 'Critical' (stored as 'ogg:managedProcessSettings:Critical').
+            auto_start (bool, optional): Start the process when the Administration Service starts. Defaults to False.
+            auto_start_delay (int, optional): Seconds to wait before that start (0-3600). Defaults to 0.
+            auto_restart (bool, optional): Restart the process when it terminates. Defaults to False.
+            restart_on_success (bool, optional): Also restart after a successful termination. Defaults to False.
+            restart_delay (int, optional): Seconds to wait before a restart (0-3600). Defaults to 0.
+            restart_retries (int, optional): Restarts allowed within restart_window (0-3600). Defaults to 9.
+            restart_window (int, optional): Seconds during which restarts are counted (0-604800). Defaults to 60.
+            disable_on_failure (bool, optional): Disable restarts once the retries are exhausted. Defaults to True.
+            description (str, optional): Description stored with the profile.
+            is_default (bool, optional): Make it the default profile for new processes. Defaults to False.
+            if_exists (str, optional): Passed to both create_config_value calls. Defaults to 'fail'.
+
+        Returns:
+            The result of the create_config_value call for the profile.
+        """
+        value = f'ogg:managedProcessSettings:{profile}'
+        settings = {
+            '$schema': 'ogg:managedProcessSettings',
+            'autoStart': {'enabled': auto_start, 'delay': auto_start_delay},
+            'autoRestart': {
+                'enabled': auto_restart,
+                'onSuccess': restart_on_success,
+                'delay': restart_delay,
+                'retries': restart_retries,
+                'window': restart_window,
+                'disableOnFailure': disable_on_failure,
+            },
+        }
+        result = self.create_config_value(
+            type='ogg:managedProcessSettings',
+            value=value,
+            data=settings,
+            if_exists=if_exists,
+        )
+        entry = {'$schema': 'ogg:configDataDescription', 'isDefault': is_default}
+        if description:
+            entry['description'] = description
+        self.create_config_value(
+            type='ogg:configDataDescription',
+            value=value,
+            data=entry,
+            if_exists=if_exists,
+        )
+        if is_default:
+            for item in self.list_config_values('ogg:configDataDescription') or []:
+                name = item.get('name') or ''
+                if not name.startswith('ogg:managedProcessSettings:') or name == value:
+                    continue
+                current = self.get_config_value(type='ogg:configDataDescription', value=name)
+                if current.get('isDefault'):
+                    self.update_config_value(
+                        type='ogg:configDataDescription',
+                        value=name,
+                        data=dict(current, isDefault=False),
+                    )
+        return result
+
+    def delete_managed_process_profile(
+        self,
+        profile,
+    ):
+        """Delete a managed process profile and its ogg:configDataDescription entry.
+
+        Args:
+            profile (str): Profile name, e.g. 'Critical'.
+
+        Returns:
+            The result of the delete_config_value call for the profile.
+        """
+        value = f'ogg:managedProcessSettings:{profile}'
+        try:
+            self.delete_config_value(type='ogg:configDataDescription', value=value)
+        except RuntimeError as e:
+            if 'code 404' not in str(e):
+                raise
+        return self.delete_config_value(type='ogg:managedProcessSettings', value=value)
 
     def start_service(
         self,

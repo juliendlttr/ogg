@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.0.4]
+
+### Added
+- `if_exists` on create methods accepts three new values besides `'fail'` (default) and `'skip'`. Each acts only when the create returns 409 (resource already exists):
+  - `'update'`: PUT endpoints resend the full body. PATCH endpoints read the resource first and send only the fields that changed, plus `$schema` and `type` when present (schemas such as `ogg:encryptionProfile` need them). Returns `{'status': 'updated', ...}`, or `{'status': 'unchanged', ...}` without any request when nothing differs.
+  - `'recreate'`: delete, then create again. Returns `{'status': 'recreated', ...}`. An extract's trail files are purged between the two (`delete_extract` leaves them on disk), and extracts and replicats wait `recreate_wait_seconds` (default 20, settable per client) before the create. A user is deleted on its role and on the undocumented `all` role, without which the create keeps returning 409. The checkpoint table is recreated with `operation: delete`, then `add`.
+  - `'verify'`: reads the resource and raises `RuntimeError` naming each field that differs from the request; returns `{'status': 'verified', ...}` otherwise. `$schema`, `status` and secrets (`password`, `credential`) are not compared. A requested top-level field missing from the resource counts as a difference. A list of strings (e.g. `config`) passes when every requested line is present.
+- `IF_EXISTS_VALUES` class attribute lists the accepted values.
+- `get_extract_lag(extract)`, `get_replicat_lag(replicat)`, `get_distribution_path_lag(distpath)`: lag in seconds, `lag` + `sinceLagReported` by default, since the reported lag stops changing once a process stops updating it (an abended extract keeps reporting its last value). `include_since_reported=False` returns the raw `lag`. `None` when no lag is reported.
+- `create_managed_process_profile(profile, auto_start=False, auto_start_delay=0, auto_restart=False, restart_on_success=False, restart_delay=0, restart_retries=9, restart_window=60, disable_on_failure=True, description=None, is_default=False, if_exists='fail')`: create a profile from named settings instead of a raw `data` dict (defaults match the server's). Like `ADD PROFILE` in the `adminclient`, it writes both the `ogg:managedProcessSettings` value and its `ogg:configDataDescription` entry. With `is_default=True`, the previous default loses its `isDefault` flag.
+- `delete_managed_process_profile(profile)`: delete a profile and its `ogg:configDataDescription` entry.
+- `purge_trail(trail, path=None, keep_files=0, keep_hours=None, keep_days=None, use_checkpoints=True)`: purge trail files through `execute_command` (`purge` / `trails`), available on 19c, 23ai and 26ai. Files are purged from the oldest sequence forward. With `use_checkpoints=True` the purge stops before the files still read by a replicat or distribution path, and aborts if a process using the trail has no valid CSN (OGG-30661) or its extract is not running (OGG-30827). `path` is required for a trail in a subdirectory. `use_checkpoints=False` also deletes the file a running extract is writing.
+- `managed_path_settings` argument on `create_distribution_path`, `update_distribution_path`, `create_receiver_path` and `update_receiver_path` (GoldenGate 23.26.4.0.0): name of a managed process profile that sets the auto-restart of the path. The server refuses it together with explicit auto-restart `options` (`OGG-30812`). The client is generated with `--ogg-home` of that release, so it also gains `type` on the credential methods, `collector_compact_queue_limit`, `failover_slot`, and `model_path` and `tokenizer_path` on the AI service models.
+
+### Changed
+- `if_exists` raises `ValueError` for an unknown value (a typo such as `'Skip'` used to behave as `'fail'`) and for a value the endpoint cannot honor, e.g. `'update'` on `create_config_type` (no PUT or PATCH on `/config/types/{type}`; the server answers 405).
+- `create_master_key_version`, `add_cluster_member` and `create_configuration_service_backend` no longer take `if_exists`: their POST names no resource, so it never returns 409 (`/masterkey` adds a new version on every call, `memberAdd` is an action, `backends` is a POST to the collection).
+- `if_exists='recreate'` raises `ValueError` on `create_deployment` and `create_cluster`: deleting either removes everything it contains (a deployment's processes, the whole cluster).
+- Service Manager AI service methods drop `installation_`, e.g. `create_installation_ai_service_provider` -> `create_ai_service_provider`. Full list: `create_`, `get_`, `update_`, `delete_` for `ai_service_provider` and `ai_service_model`, `list_ai_service_providers`, `list_ai_service_models`, `get_ai_service_health`. The Administration Server's read-only `list_ai_service_models` / `get_ai_service_model` (models available to one deployment) are renamed to `list_deployment_ai_service_models` / `get_deployment_ai_service_model` to free those names. The old names are removed, with no aliases.
+- Every error response now raises `RuntimeError` (`ERROR (code NNN) - <url>: ...`). An error whose body has an empty `messages` list, as the AI service endpoints return, used to raise `requests.HTTPError` instead.
+
+### Fixed
+- `_extract_main` no longer fails with `TypeError` on an empty response body, e.g. an AI service DELETE.
+
 ## [1.0.3]
 
 ### Added
@@ -30,7 +54,7 @@
   - `list_receiver_paths`: `target_initiated` (`targetInitiated`)
   - `list_trail_sequences`: `path`
   - `list_trails`: `details`
-- These new parameters land before `raw_response` (and, on a few methods, before `ogg_service`) in the signature, shifting positional arguments in the affected methods - pass by keyword.
+- These new parameters arrive before `raw_response` (and, on a few methods, before `ogg_service`) in the signature, shifting positional arguments in the affected methods - pass by keyword.
 - Internal `_call()` accepts `query_params`, which is merged into `params` with `None` values dropped.
 
 ### Changed
